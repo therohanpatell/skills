@@ -1,0 +1,6 @@
+node_modules/
+logs/
+data/state.json
+data/thumbs/
+.env
+__pycache__/

@@ -1,0 +1,53 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8300
+  },
+  "paths": {
+    "ytdlp": "yt-dlp",
+    "ffmpeg": "ffmpeg",
+    "mpv": "mpv",
+    "python": "python",
+    "dataDir": "data",
+    "logDir": "logs"
+  },
+  "limits": {
+    "maxSources": 20
+  },
+  "vcam": {
+    "enabled": true,
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "pixelFormat": "nv12"
+  },
+  "preview": {
+    "width": 640,
+    "fps": 12,
+    "quality": 8
+  },
+  "monitor": {
+    "enabled": true,
+    "audioDevice": "auto",
+    "hwdec": "auto-safe"
+  },
+  "ffmpeg": {
+    "hwaccel": "d3d11va",
+    "hwaccelFallback": true
+  },
+  "resolve": {
+    "timeoutMs": 45000,
+    "liveRefreshMs": 10800000,
+    "vodRefreshMs": 18000000,
+    "maxVideoHeight": 1080
+  },
+  "stats": {
+    "intervalMs": 2000
+  },
+  "supervisor": {
+    "restartBaseDelayMs": 1000,
+    "restartMaxDelayMs": 30000,
+    "circuitBreakerFailures": 6,
+    "circuitBreakerWindowMs": 120000
+  }
+}

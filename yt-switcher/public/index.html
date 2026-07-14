@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YT Switcher — Program Router</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="layout">
+    <main class="main">
+      <!-- ======================= PROGRAM ======================= -->
+      <section class="program" aria-label="Program output">
+        <header class="panel-title">
+          <span class="tally" id="programTally"></span> PROGRAM
+          <span class="program-title" id="programSourceTitle"></span>
+        </header>
+
+        <div class="program-screen" id="programScreen">
+          <img id="programPreview" alt="" draggable="false">
+          <div class="program-overlay" id="programOverlay">
+            <div class="overlay-text" id="overlayText">NO PROGRAM — select a source below</div>
+          </div>
+          <div class="program-infobar" id="programInfobar">
+            <span id="infoRes">—</span>
+            <span id="infoFps">— fps</span>
+            <span id="infoBuffer">buf —</span>
+            <span id="infoLive" class="badge">—</span>
+            <span id="infoTime">--:--</span>
+          </div>
+        </div>
+
+        <div class="program-controls">
+          <button id="btnPlay"  class="ctl" title="Play">&#9654;</button>
+          <button id="btnPause" class="ctl" title="Pause">&#10073;&#10073;</button>
+          <button id="btnStop"  class="ctl" title="Stop program">&#9632;</button>
+          <span class="ctl-sep"></span>
+          <button id="btnMute" class="ctl" title="Mute / unmute">&#128266;</button>
+          <input id="volume" type="range" min="0" max="130" step="1" title="Volume">
+          <span id="volumeLabel" class="volume-label">100</span>
+          <span class="ctl-sep"></span>
+          <button id="btnFullscreen" class="ctl" title="Fullscreen preview">&#x26F6;</button>
+        </div>
+      </section>
+
+      <!-- ===================== PREVIEW GRID ===================== -->
+      <section class="previews" aria-label="Sources">
+        <header class="panel-title">SOURCES <span id="sourceCount" class="dim"></span></header>
+        <div class="grid" id="previewGrid"></div>
+      </section>
+    </main>
+
+    <!-- ======================= SIDE PANEL ====================== -->
+    <aside class="side">
+      <section class="side-block">
+        <header class="panel-title">ADD SOURCE</header>
+        <form id="addForm" autocomplete="off">
+          <input id="urlInput" type="url" placeholder="Paste YouTube video / live URL…" required>
+          <button type="submit" id="btnAdd">Add</button>
+        </form>
+        <div class="form-error" id="addError"></div>
+        <button id="btnClearAll" class="danger-link">Clear all sources</button>
+      </section>
+
+      <section class="side-block">
+        <header class="panel-title">VIRTUAL CAMERA</header>
+        <div class="kv"><span>Device</span><b>OBS Virtual Camera</b></div>
+        <div class="kv"><span>Format</span><b id="vcamFormat">—</b></div>
+        <div class="kv"><span>Status</span><b id="vcamStatus" class="status-pill">—</b></div>
+        <button id="btnVcamReset" class="mini-btn">Reset bridge</button>
+      </section>
+
+      <section class="side-block">
+        <header class="panel-title">MONITOR (mpv)</header>
+        <div class="kv"><span>Status</span><b id="monitorStatus" class="status-pill">—</b></div>
+        <button id="btnMonitorToggle" class="mini-btn">Toggle monitor window</button>
+      </section>
+
+      <section class="side-block">
+        <header class="panel-title">SYSTEM</header>
+        <div class="kv"><span>App CPU</span><b id="statCpu">—</b></div>
+        <div class="kv"><span>App RAM</span><b id="statRam">—</b></div>
+        <div class="kv"><span>System RAM</span><b id="statSysRam">—</b></div>
+        <div class="kv"><span>GPU</span><b id="statGpu">n/a</b></div>
+        <div class="kv"><span>GPU decode</span><b id="statGpuDec">n/a</b></div>
+        <div class="proc-table" id="procTable"></div>
+      </section>
+
+      <section class="side-block">
+        <header class="panel-title">SELECTED STREAM</header>
+        <div id="selectedInfo" class="selected-info dim">Nothing selected</div>
+      </section>
+
+      <footer class="conn" id="connState">connecting…</footer>
+    </aside>
+  </div>
+
+  <template id="cardTemplate">
+    <div class="card" tabindex="0" role="button">
+      <div class="thumb">
+        <img alt="" draggable="false" loading="lazy">
+        <div class="thumb-fallback">▶</div>
+        <span class="live-badge">LIVE</span>
+        <span class="spinner"></span>
+        <span class="error-badge" title=""></span>
+      </div>
+      <div class="card-meta">
+        <div class="card-title"></div>
+        <div class="card-sub"></div>
+      </div>
+      <button class="card-remove" title="Remove">✕</button>
+    </div>
+  </template>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

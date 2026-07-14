@@ -1,0 +1,22 @@
+{
+  "name": "yt-switcher",
+  "version": "1.0.0",
+  "description": "Lightweight local YouTube video routing/switching system with Windows Virtual Camera output",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "dependencies": {
+    "@fastify/static": "^7.0.4",
+    "@fastify/websocket": "^10.0.1",
+    "fastify": "^4.28.1",
+    "pidusage": "^3.0.2",
+    "pino": "^9.3.2"
+  },
+  "license": "MIT"
+}
