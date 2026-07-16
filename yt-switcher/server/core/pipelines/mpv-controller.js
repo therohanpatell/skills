@@ -34,6 +34,7 @@
 
 const net = require('net');
 const path = require('path');
+const { execFile } = require('child_process');
 const { EventEmitter } = require('events');
 const config = require('../../lib/config');
 const logger = require('../../lib/logger');
@@ -170,6 +171,12 @@ class MpvController extends EventEmitter {
 
   start() {
     this.enabled = true;
+    if (config.isWindows) {
+      // Reap orphaned monitors from a previous crashed run (matched by our
+      // window title) — they hold the audio device and confuse operators.
+      execFile('taskkill', ['/f', '/fi', 'WINDOWTITLE eq YT Switcher*'],
+        { windowsHide: true }, () => {});
+    }
     this.proc.start();
   }
 

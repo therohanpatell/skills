@@ -28,6 +28,11 @@ async function buildApp(ctx) {
   await app.register(fastifyStatic, {
     root: path.join(config.root, 'public'),
     cacheControl: false,
+    // no-store: browsers heuristically cache JS/CSS without a Cache-Control
+    // header, leaving operators running STALE frontend code after updates.
+    setHeaders(res) {
+      res.setHeader('Cache-Control', 'no-store');
+    },
   });
   await app.register(fastifyWebsocket, {
     options: { maxPayload: 4096 },

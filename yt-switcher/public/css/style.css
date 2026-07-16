@@ -497,6 +497,18 @@ body {
 }
 .mini-btn:hover { color: var(--text); border-color: var(--accent); }
 
+.test-result {
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.test-result:empty { display: none; }
+
 .proc-table { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
 .proc-table div { display: flex; justify-content: space-between; }
 

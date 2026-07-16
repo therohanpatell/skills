@@ -179,6 +179,22 @@ function renderProgram() {
   const source = state.sources.find((s) => s.id === programId);
   const active = status === 'playing' || status === 'starting' || status === 'paused';
 
+  // Program switched to a different video: reset the DVR timeline and seed
+  // it from the source's known duration + saved resume position immediately,
+  // instead of showing the previous video's stale state (or --:--).
+  if (renderProgram._lastId !== programId) {
+    renderProgram._lastId = programId;
+    dvrScrubbing = false;
+    dvrSeeking = false;
+    const dur = (source && !source.isLive && source.duration) || 0;
+    const pos = (source && !source.isLive && source.positionSec) || 0;
+    lastKnownDuration = dur;
+    els.dvrTimeline.value = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
+    setText(els.dvrTime, dur > 0 ? `${fmtTime(pos)} / ${fmtTime(dur)}` : '--:-- / --:--');
+    setText(els.dvrRemaining, dur > 0 ? `-${fmtTime(Math.max(0, dur - pos))}` : '--:--');
+    setText(els.infoTime, dur > 0 ? fmtTime(pos) : '--:--');
+  }
+
   els.programTally.classList.toggle('on', status === 'playing');
   els.programTally.classList.toggle('paused', status === 'paused');
   setText(els.programSourceTitle, source ? `— ${source.title}` : '');
@@ -500,6 +516,25 @@ $('btnFullscreen').addEventListener('click', () => {
 });
 $('btnMonitorToggle').addEventListener('click', () => api.toggleMonitor().catch(showError));
 $('btnVcamReset').addEventListener('click', () => api.resetVcam().catch(showError));
+
+$('btnAudioTest').addEventListener('click', async () => {
+  const out = $('audioTestResult');
+  setText(out, 'Playing 1.5s test beep through the speakers…');
+  try {
+    const r = await api.audioTest();
+    out.textContent = [
+      `tone: ${r.toneTest}`,
+      `mpv: ${r.mpvVersion}`,
+      `mpv control (IPC): ${r.ipcConnected ? 'connected' : 'NOT CONNECTED — this is why there is no audio'}`,
+      `monitor status: ${r.monitorStatus}`,
+      '',
+      'mpv.log tail:',
+      ...(r.mpvLogTail || []),
+    ].join('\n');
+  } catch (err) {
+    setText(out, `audio test failed: ${err.message}`);
+  }
+});
 if (els.vcamDeviceSelect) {
   els.vcamDeviceSelect.addEventListener('change', () => {
     api.setVcamDevice(els.vcamDeviceSelect.value).catch(showError);

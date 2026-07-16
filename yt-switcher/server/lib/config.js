@@ -82,10 +82,13 @@ function buildConfig() {
       hwaccel: env('YTSW_FFMPEG_HWACCEL', defaults.ffmpeg.hwaccel),
     },
     isWindows: process.platform === 'win32',
+    // Per-process pipe name: a zombie mpv from a previous run holding the
+    // fixed name would stop the new mpv's IPC server from ever coming up
+    // (symptom: monitor stuck on 'starting', no audio, no timeline).
     mpvIpcPath:
       process.platform === 'win32'
-        ? '\\\\.\\pipe\\ytswitcher-mpv'
-        : path.join(require('os').tmpdir(), 'ytswitcher-mpv.sock'),
+        ? `\\\\.\\pipe\\ytswitcher-mpv-${process.pid}`
+        : path.join(require('os').tmpdir(), `ytswitcher-mpv-${process.pid}.sock`),
   };
 
   fs.mkdirSync(cfg.paths.dataDir, { recursive: true });

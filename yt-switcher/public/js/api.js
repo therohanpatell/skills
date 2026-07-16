@@ -37,4 +37,7 @@ export const api = {
   setAudioDevice: (device) => request('POST', '/api/playback', { action: 'audio-device', value: device }),
   setVcamDevice: (device) => request('POST', '/api/playback', { action: 'vcam-device', value: device }),
   setSpeed: (speed) => request('POST', '/api/playback', { action: 'speed', value: speed }),
+
+  // Diagnostics
+  audioTest: () => request('POST', '/api/system/audio-test'),
 };

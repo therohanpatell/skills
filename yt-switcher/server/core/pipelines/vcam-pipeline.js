@@ -375,6 +375,7 @@ class VcamPipeline extends EventEmitter {
     this._paused = false;
     this._writeOff = 0;
     this._stderr = [];
+    this._stderrBuf = '';
     this._frameTimes = [];
     this._lastFrameTime = 0;
     this._perf.droppedFrames = 0;
@@ -505,9 +506,15 @@ class VcamPipeline extends EventEmitter {
    * ================================================================ */
 
   _onStderr(d) {
-    const text = d.toString();
-    this._parseProgress(text);
-    for (const line of text.split('\n')) {
+    // Line-buffer: a key=value progress line can be split across two pipe
+    // chunks, and a torn "out_time_ms=123" would parse as garbage.
+    this._stderrBuf = (this._stderrBuf || '') + d.toString();
+    const lines = this._stderrBuf.split('\n');
+    this._stderrBuf = lines.pop();
+    if (!lines.length) return;
+
+    this._parseProgress(lines);
+    for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       // Skip progress key=value lines (parsed above)
@@ -518,8 +525,8 @@ class VcamPipeline extends EventEmitter {
     }
   }
 
-  _parseProgress(text) {
-    for (const line of text.split('\n')) {
+  _parseProgress(lines) {
+    for (const line of lines) {
       const eq = line.indexOf('=');
       if (eq < 0) continue;
       const key = line.substring(0, eq).trim();
