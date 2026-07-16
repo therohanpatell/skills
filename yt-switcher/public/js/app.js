@@ -135,6 +135,8 @@ function createCard(id) {
   card.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' || ev.key === ' ') {
       ev.preventDefault();
+      // Don't let the document-level Space (play/pause) hotkey also fire.
+      ev.stopPropagation();
       api.setProgram(id).catch(showError);
     }
   });

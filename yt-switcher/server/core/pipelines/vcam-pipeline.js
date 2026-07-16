@@ -224,17 +224,19 @@ class VcamPipeline extends EventEmitter {
       const msg = `Virtual camera "${failedDev}" unavailable. Switched to "${fallback}".`;
       logger.info({ fallback }, msg);
       this.notification = msg;
-      this.setDevice(fallback).catch(() => {});
+      // Failover is temporary: don't persist it, so the user's preferred
+      // device is tried again on the next launch.
+      this.setDevice(fallback, { persist: false }).catch(() => {});
     }
   }
 
-  /** Change output device dynamically. */
-  async setDevice(deviceName) {
+  /** Change output device dynamically. persist=false for automatic failover. */
+  async setDevice(deviceName, { persist = true } = {}) {
     if (!deviceName || deviceName === this.currentDevice) return;
     logger.info({ from: this.currentDevice, to: deviceName }, 'switching virtual camera device');
 
     this.currentDevice = deviceName;
-    if (this.store) {
+    if (persist && this.store) {
       this.store.update((st) => {
         st.settings.vcamDevice = deviceName;
       });
@@ -468,7 +470,8 @@ class VcamPipeline extends EventEmitter {
     proc.stdout.on('data', (chunk) => this._onRawVideo(proc, gen, chunk));
     proc.stderr.on('data', (d) => this._onStderr(d));
     proc.on('error', (err) => logger.error({ err }, 'ffmpeg spawn error'));
-    proc.once('exit', (code) => this._onExit(proc, code, videoUrl, isLive, seekTo, hwaccel));
+    proc.once('exit', (code) =>
+      this._onExit(proc, code, videoUrl, { isLive, seekTo, speed, userAgent }, hwaccel));
   }
 
   /* ================================================================
@@ -519,20 +522,22 @@ class VcamPipeline extends EventEmitter {
    *  FFmpeg Exit
    * ================================================================ */
 
-  _onExit(proc, code, videoUrl, isLive, seekTo, hwaccel) {
+  _onExit(proc, code, videoUrl, startOpts, hwaccel) {
     if (this.ffmpeg !== proc) return; // Superseded by a newer start()
     this.ffmpeg = null;
     this._perf.encoderStatus = code === 0 ? 'idle' : 'error';
     const uptimeMs = Date.now() - this._startedAt;
     const expected = this._stopping;
 
-    // Auto-retry without hardware accel if hw decode init failed fast
+    // Auto-retry without hardware accel if hw decode init failed fast.
+    // startOpts carries the full original options (isLive, seekTo, speed,
+    // userAgent) so the software retry is identical apart from hwaccel.
     if (!expected && !this._hwFailed && uptimeMs < QUICK_FAIL_MS &&
         config.ffmpeg.hwaccelFallback && hwaccel !== 'none' &&
         /d3d11|dxva|cuda|qsv|hwaccel|hardware/i.test(this._stderr.join('\n'))) {
       logger.warn('hardware decode failed, falling back to software mode');
       this._hwFailed = true;
-      this.start(videoUrl, { isLive, seekTo });
+      this.start(videoUrl, startOpts);
       return;
     }
 
