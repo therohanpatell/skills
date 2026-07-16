@@ -167,11 +167,35 @@ class SourceManager extends EventEmitter {
       videoUrl = (vid && vid.url) || videoUrl;
       audioUrl = (aud && aud.url) || null;
     }
+
+    const isLive = Boolean(json.is_live);
+
+    // Live streams: prefer a MUXED HLS variant capped at maxLiveHeight
+    // (default 720p). One manifest for both ffmpeg and mpv means audio is
+    // guaranteed (no split-stream sync issues) and bandwidth is halved vs
+    // 1080p — the stability the vcam path needs matters more than pixels.
+    if (isLive && Array.isArray(json.formats)) {
+      const maxH = config.resolve.maxLiveHeight || 720;
+      const muxed = json.formats.filter(
+        (f) => f.url && f.vcodec && f.vcodec !== 'none' &&
+               f.acodec && f.acodec !== 'none' &&
+               /m3u8/i.test(f.protocol || '')
+      );
+      const capped = muxed
+        .filter((f) => (f.height || 0) <= maxH)
+        .sort((a, b) => (b.height || 0) - (a.height || 0));
+      const pick = capped[0] ||
+        muxed.sort((a, b) => (a.height || 0) - (b.height || 0))[0];
+      if (pick) {
+        videoUrl = pick.url;
+        audioUrl = null;
+        logger.info({ id: source.id, height: pick.height }, 'live: using muxed HLS variant');
+      }
+    }
+
     if (!videoUrl) {
       throw new AppError('No playable stream URL found', { code: 'RESOLVE_FAILED', status: 422 });
     }
-
-    const isLive = Boolean(json.is_live);
     const userAgent = (json.http_headers && json.http_headers['User-Agent']) || null;
     this.resolved.set(source.id, { videoUrl, audioUrl, isLive, userAgent, resolvedAt: Date.now() });
 
@@ -198,6 +222,32 @@ class SourceManager extends EventEmitter {
     const maxAge = entry && entry.isLive ? config.resolve.liveRefreshMs : config.resolve.vodRefreshMs;
     if (!force && entry && Date.now() - entry.resolvedAt < maxAge) return entry;
     return this.resolve(id);
+  }
+
+  /**
+   * Remember the playback position of a VOD source so it resumes from
+   * there after a pause, switch-away, or app restart. Persisted (debounced)
+   * but deliberately NOT broadcast — a position tick every few seconds
+   * must not trigger UI re-renders.
+   */
+  savePosition(id, seconds) {
+    const s = this.store.state.sources.find((x) => x.id === id);
+    if (!s || s.isLive) return;
+    const pos = Math.max(0, Math.floor(Number(seconds) || 0));
+    if (s.positionSec === pos) return;
+    this.store.update((st) => {
+      const t = st.sources.find((x) => x.id === id);
+      if (t) t.positionSec = pos;
+    });
+  }
+
+  /** Resume position for a VOD source (0 = start from the beginning). */
+  resumePosition(id) {
+    const s = this.store.state.sources.find((x) => x.id === id);
+    if (!s || s.isLive || !s.positionSec) return 0;
+    // Don't resume from the last few seconds of the video.
+    if (s.duration && s.positionSec > s.duration - 10) return 0;
+    return s.positionSec > 5 ? s.positionSec : 0;
   }
 
   thumbnailPath(id) {

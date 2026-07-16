@@ -88,6 +88,16 @@ class MpvController extends EventEmitter {
     this._isLive = false;
     this.currentSpeed = 1;
 
+    // Monitor mode: 'video-audio' (window + sound) or 'audio-only'
+    // (no window, sound keeps playing). Audio must never silently die,
+    // so "toggling the monitor off" means audio-only, not no-mpv.
+    this.mode = config.monitor.mode === 'audio-only' ? 'audio-only' : 'video-audio';
+
+    // Last load() arguments — replayed after (re)connect so a program is
+    // never lost to a race (startup restore before the IPC pipe is up,
+    // or an mpv crash/restart mid-show).
+    this._lastLoad = null;
+
     // Supervised mpv process
     this.proc = new ManagedProcess('mpv', () => ({
       cmd: config.paths.mpv,
@@ -130,7 +140,7 @@ class MpvController extends EventEmitter {
     ];
 
     // Video vs audio-only mode
-    if (config.monitor.mode === 'audio-only') {
+    if (this.mode === 'audio-only') {
       args.push('--video=no');
     } else {
       args.push(
@@ -171,6 +181,24 @@ class MpvController extends EventEmitter {
     return this.sock ? 'running' : this.proc.status;
   }
 
+  /**
+   * Switch between 'video-audio' and 'audio-only'. Restarts mpv with the
+   * new arguments; the current program is replayed automatically once the
+   * new instance's IPC comes up (via _lastLoad).
+   */
+  async setMode(mode) {
+    const next = mode === 'audio-only' ? 'audio-only' : 'video-audio';
+    if (next === this.mode) return;
+    this.mode = next;
+    logger.info({ mode: next }, 'switching monitor mode');
+    if (!this.enabled) return;
+    this._teardown();
+    this.proc.stop();
+    setTimeout(() => {
+      if (this.enabled) this.proc.reset();
+    }, 300);
+  }
+
   get pid() {
     return this.proc.pid;
   }
@@ -208,6 +236,15 @@ class MpvController extends EventEmitter {
       this._pollTimer = setInterval(() => this._poll(), POLL_MS);
 
       this.emit('status', 'running');
+
+      // Replay the current program: any load() issued while the pipe was
+      // down (startup restore, mpv restart) would otherwise be lost —
+      // leaving no audio, no timeline, and no property updates.
+      if (this._lastLoad) {
+        const { videoUrl, audioUrl, opts } = this._lastLoad;
+        logger.info('replaying program load after IPC (re)connect');
+        this.load(videoUrl, audioUrl, opts).catch(() => {});
+      }
     });
 
     sock.once('error', () => {
@@ -357,11 +394,17 @@ class MpvController extends EventEmitter {
    * @param {boolean} [opts.isLive]    - Live stream flag
    * @param {string}  [opts.userAgent] - HTTP User-Agent
    */
-  async load(videoUrl, audioUrl, { volume, muted, speed, isLive = false, userAgent = null } = {}) {
+  async load(videoUrl, audioUrl, opts = {}) {
+    const { volume, muted, speed, isLive = false, userAgent = null, startAt = 0 } = opts;
     if (!this.enabled) return;
     this._isLive = isLive;
+    this._lastLoad = { videoUrl, audioUrl, opts };
 
-    const spd = (typeof speed === 'number' && speed > 0) ? speed : this.currentSpeed;
+    // Live streams ALWAYS play at 1× — a leftover VOD speed (e.g. 1.5×)
+    // must never leak into live playback. The speed observer then guards 1×.
+    const spd = isLive
+      ? 1
+      : (typeof speed === 'number' && speed > 0) ? speed : this.currentSpeed;
     this.currentSpeed = spd;
 
     // ---- Configure cache/buffering BEFORE loading ----
@@ -388,6 +431,9 @@ class MpvController extends EventEmitter {
     }
     if (userAgent) {
       optParts.push(`user-agent=${userAgent}`);
+    }
+    if (startAt > 0 && !isLive) {
+      optParts.push(`start=${Math.floor(startAt)}`);
     }
 
     // ---- Load the file ----
@@ -417,6 +463,7 @@ class MpvController extends EventEmitter {
   async stopPlayback() {
     this._hasMedia = false;
     this._isLive = false;
+    this._lastLoad = null;
     await this.command(['stop']);
   }
 
@@ -437,7 +484,8 @@ class MpvController extends EventEmitter {
   }
 
   setSpeed(v) {
-    const s = Math.max(0.1, Math.min(4.0, Number(v) || 1));
+    // Live playback is pinned to 1× — the observer would fight anything else.
+    const s = this._isLive ? 1 : Math.max(0.1, Math.min(4.0, Number(v) || 1));
     this.currentSpeed = s;
     return this.command(['set_property', 'speed', s]);
   }

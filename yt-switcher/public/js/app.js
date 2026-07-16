@@ -65,6 +65,7 @@ const els = {
 let state = null;
 const cardNodes = new Map(); // source id -> element
 let previewAttached = false;
+let lastMpvPropsAt = 0; // for the ffmpeg-stats fallback in the info bar
 let dvrScrubbing = false; // true when user is dragging the timeline slider
 let dvrSeeking = false;   // true after scrub release until mpv confirms position
 let lastKnownDuration = 0; // cached duration for scrub-time calculations
@@ -220,6 +221,14 @@ function renderProgram() {
   const showDvr = active && source && !source.isLive;
   els.dvrControls.classList.toggle('hidden', !showDvr);
 
+  // Live streams are pinned to 1× — lock the speed selector.
+  const liveProgram = Boolean(source && source.isLive);
+  els.speedSelect.disabled = liveProgram;
+  els.speedSelect.title = liveProgram
+    ? 'Playback speed is locked to 1x for live streams'
+    : 'Playback speed';
+  if (liveProgram) els.speedSelect.value = '1';
+
   // Update play/pause button states
   $('btnPlay').classList.toggle('active', status === 'playing');
   $('btnPause').classList.toggle('active', status === 'paused');
@@ -229,7 +238,16 @@ function renderSidePanel() {
   const v = state.vcam;
   setText(els.vcamFormat, `${v.width}×${v.height} @ ${v.fps}fps`);
   setPill(els.vcamStatus, v.status);
-  setPill(els.monitorStatus, state.monitor.status);
+  const monMode = state.monitor.mode;
+  setPill(els.monitorStatus, state.monitor.status === 'running' && monMode === 'audio-only'
+    ? 'audio-only'
+    : state.monitor.status);
+  const monBtn = $('btnMonitorToggle');
+  if (monBtn) {
+    monBtn.textContent = monMode === 'audio-only'
+      ? 'Show monitor window'
+      : 'Hide window (keep audio)';
+  }
 
   if (els.vcamDeviceSelect && v.availableDevices) {
     const activeDev = v.device || 'OBS-Camera';
@@ -306,6 +324,18 @@ function renderStats(stats) {
   // Update performance panel from stats
   if (stats.performance) {
     renderPerformance(stats.performance);
+
+    // Fallback: if mpv properties aren't flowing (monitor audio-only or
+    // briefly restarting), keep the Program info bar alive from FFmpeg's
+    // own progress stats instead of showing blanks.
+    const playing = state && state.program && state.program.status === 'playing';
+    if (playing && Date.now() - lastMpvPropsAt > 3000) {
+      const p = stats.performance;
+      if (p.ffmpegFps > 0) setText(els.infoFps, `${p.ffmpegFps.toFixed(1)} fps`);
+      if (p.videoBitrate && p.videoBitrate !== '0 kbps') {
+        setText(els.infoBuffer, p.videoBitrate);
+      }
+    }
   }
 }
 
@@ -329,6 +359,7 @@ function renderPerformance(perf) {
 }
 
 function renderMpvProps(props) {
+  lastMpvPropsAt = Date.now();
   const vp = props['video-params'];
   setText(els.infoRes, vp && vp.w ? `${vp.w}×${vp.h}` : '—');
   const fps = props['estimated-vf-fps'];

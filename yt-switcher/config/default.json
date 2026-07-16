@@ -17,9 +17,9 @@
   "vcam": {
     "enabled": true,
     "device": "OBS Virtual Camera",
-    "width": 1920,
-    "height": 1080,
-    "fps": 60,
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
     "pixelFormat": "nv12"
   },
   "preview": {
@@ -45,7 +45,8 @@
     "timeoutMs": 45000,
     "liveRefreshMs": 10800000,
     "vodRefreshMs": 18000000,
-    "maxVideoHeight": 1080
+    "maxVideoHeight": 1080,
+    "maxLiveHeight": 720
   },
   "stats": {
     "intervalMs": 1000

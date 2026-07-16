@@ -48,7 +48,7 @@ async function main() {
           availableDevices: pipeline.availableDevices,
           notification: pipeline.notification,
         },
-        monitor: { status: monitor.status },
+        monitor: { status: monitor.status, mode: monitor.mode },
         limits: config.limits,
       };
     },
@@ -56,11 +56,15 @@ async function main() {
 
   await pipeline.init();
 
-  const monitorEnabled =
-    store.state.settings.monitorEnabled === null
-      ? config.monitor.enabled
-      : store.state.settings.monitorEnabled;
-  if (monitorEnabled) monitor.start();
+  // mpv is the audio path, so it runs whenever the config allows it.
+  // A persisted "monitor off" from older versions maps to audio-only mode
+  // (window hidden, sound alive) instead of killing audio outright.
+  const s = store.state.settings;
+  monitor.mode =
+    s.monitorMode ||
+    (s.monitorEnabled === false ? 'audio-only' : config.monitor.mode) ||
+    'video-audio';
+  if (config.monitor.enabled) monitor.start();
 
   const app = await buildApp(ctx);
   await app.listen({ host: config.server.host, port: config.server.port });

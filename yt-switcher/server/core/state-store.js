@@ -17,6 +17,7 @@ const DEFAULT_STATE = {
     muted: false,
     speed: 1,
     monitorEnabled: null, // null = follow config default
+    monitorMode: null,    // null = follow config; 'video-audio' | 'audio-only'
     vcamDevice: null,     // null = follow default plugin device
   },
 };

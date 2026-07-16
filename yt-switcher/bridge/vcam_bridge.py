@@ -24,6 +24,7 @@ import os
 import sys
 import threading
 import time
+from collections import deque
 
 try:
     import numpy as np
@@ -92,32 +93,30 @@ def main():
     except Exception:
         stdin = sys.stdin.buffer
 
-    # Double buffer pool for zero-allocation reading
-    buffers = [bytearray(frame_size), bytearray(frame_size)]
-    write_idx = 0
-
-    # 1-slot mailbox guarded by a lock: reader overwrites, sender snapshots.
-    latest = {"frame": None, "gen": 0}
+    # Jitter buffer: a bounded FIFO of ~1 second of frames. The old 1-slot
+    # mailbox made live playback rubber-band — when FFmpeg burst ahead the
+    # extra frames were dropped (looked fast), when the network hiccuped the
+    # last frame repeated (looked slow). A FIFO drained at exactly `fps`
+    # absorbs both directions of jitter; when full, the OLDEST frame is
+    # dropped so latency stays bounded (~1s worst case).
+    queue = deque(maxlen=max(args.fps, 10))
+    read_buf = bytearray(frame_size)
     lock = threading.Lock()
     eof = threading.Event()
 
     def reader():
-        """Blocking reader: reads into the inactive buffer, swaps on completion."""
-        nonlocal write_idx
-        gen = 0
+        """Blocking reader: fills the scratch buffer, copies into the queue."""
         while True:
-            active_write_buf = buffers[write_idx]
-            if not read_exact_into(stdin, active_write_buf):
+            if not read_exact_into(stdin, read_buf):
                 eof.set()
                 return
-            if not validate_nv12_frame(active_write_buf, args.width, args.height):
+            if not validate_nv12_frame(read_buf, args.width, args.height):
                 continue
-            gen += 1
-            arr = np.frombuffer(active_write_buf, dtype=np.uint8).reshape((args.height * 3 // 2, args.width))
+            # Copy: queue entries must not alias the reused scratch buffer.
+            arr = np.frombuffer(read_buf, dtype=np.uint8).reshape(
+                (args.height * 3 // 2, args.width)).copy()
             with lock:
-                latest["frame"] = arr
-                latest["gen"] = gen
-            write_idx = 1 - write_idx
+                queue.append(arr)
 
     threading.Thread(target=reader, daemon=True).start()
 
@@ -201,18 +200,15 @@ def main():
     frames_sent = 0
     frames_repeated = 0
     last_report = time.monotonic()
-    last_gen = 0
 
     with cam:
         while True:
             with lock:
-                frame = latest["frame"]
-                gen = latest["gen"]
-                latest["frame"] = None
+                frame = queue.popleft() if queue else None
+                queue_empty = not queue
 
-            if frame is not None and gen != last_gen:
+            if frame is not None:
                 last_frame = frame
-                last_gen = gen
                 frames_sent += 1
             else:
                 frames_repeated += 1
@@ -226,13 +222,14 @@ def main():
                 total = frames_sent + frames_repeated
                 pct_new = (frames_sent / total * 100) if total else 0
                 print(f"vcam perf: {frames_sent} new + {frames_repeated} repeated "
-                      f"in {now - last_report:.1f}s ({pct_new:.0f}% fresh)",
+                      f"in {now - last_report:.1f}s ({pct_new:.0f}% fresh, "
+                      f"queue {len(queue)})",
                       file=sys.stderr, flush=True)
                 frames_sent = 0
                 frames_repeated = 0
                 last_report = now
 
-            if eof.is_set() and latest["frame"] is None:
+            if eof.is_set() and queue_empty:
                 print("stdin closed, exiting", file=sys.stderr, flush=True)
                 return
 

@@ -80,6 +80,21 @@ class Switcher extends EventEmitter {
     this.pipeline.on('exit', (info) => this._onPipelineLost(info));
     this.monitor.on('ended', () => this._onStreamEnded());
 
+    // Track VOD playback position (throttled) so pause/switch/restart can
+    // resume from where the viewer left off.
+    this._lastPosSaveAt = 0;
+    this.monitor.on('props', (props) => {
+      const pos = props['time-pos'];
+      if (
+        pos != null && this.status === 'playing' && this.programId &&
+        this._currentStreams && !this._currentStreams.isLive &&
+        Date.now() - this._lastPosSaveAt > 5000
+      ) {
+        this._lastPosSaveAt = Date.now();
+        this.sources.savePosition(this.programId, pos);
+      }
+    });
+
     // Periodic URL freshness check
     this._refreshTimer = setInterval(() => this._checkUrlFreshness(), REFRESH_CHECK_MS);
   }
@@ -117,6 +132,9 @@ class Switcher extends EventEmitter {
     // Validate source exists
     this.sources.get(id);
 
+    // Remember where the outgoing VOD program was, so it resumes later.
+    this._saveCurrentPosition();
+
     // New generation — invalidates any in-flight async work
     const gen = ++this._gen;
     clearTimeout(this._retryTimer);
@@ -128,31 +146,38 @@ class Switcher extends EventEmitter {
     this._setStatus('resolving');
 
     try {
-      // Resolve the stream URL via yt-dlp
+      // Resolve the stream URL via yt-dlp (cached → instant on the hot path)
       const streams = await this.sources.getFreshStreams(id);
       if (gen !== this._gen) return; // Stale — user switched again
 
       this._currentStreams = streams;
       this._setStatus('starting');
 
-      // Start vcam pipeline (video only — no audioUrl needed)
       const { volume, muted, speed } = this.store.state.settings;
-      const currentSpeed = speed || 1;
+      const currentSpeed = streams.isLive ? 1 : (speed || 1);
+      const startAt = streams.isLive ? 0 : this.sources.resumePosition(id);
 
+      // Start vcam pipeline (video only — no audioUrl needed)
       this.pipeline.start(streams.videoUrl, {
         isLive: streams.isLive,
+        seekTo: startAt,
         speed: currentSpeed,
         userAgent: streams.userAgent,
       });
 
-      // Start monitor (handles audio + optional operator preview)
-      await this.monitor.load(streams.videoUrl, streams.audioUrl, {
-        volume,
-        muted,
-        speed: currentSpeed,
-        isLive: streams.isLive,
-        userAgent: streams.userAgent,
-      });
+      // Start the monitor IN PARALLEL — its load sequence (settle delay +
+      // several IPC round-trips) must not sit between the click and the
+      // program going live. Failures surface via monitor status, not here.
+      this.monitor
+        .load(streams.videoUrl, streams.audioUrl, {
+          volume,
+          muted,
+          speed: currentSpeed,
+          isLive: streams.isLive,
+          userAgent: streams.userAgent,
+          startAt,
+        })
+        .catch((err) => logger.warn({ err: err.message }, 'monitor load failed'));
 
       if (gen !== this._gen) return; // Stale
       this._setStatus('playing');
@@ -168,6 +193,7 @@ class Switcher extends EventEmitter {
 
   /** Stop the current program. */
   async stopProgram() {
+    this._saveCurrentPosition();
     this._gen++;
     clearTimeout(this._retryTimer);
     this.isPaused = false;
@@ -179,12 +205,25 @@ class Switcher extends EventEmitter {
     this._setStatus('idle');
   }
 
-  /** Pause playback (both monitor audio and vcam freeze frame). */
+  /**
+   * Pause playback everywhere: mpv pauses in place, and FFmpeg is KILLED
+   * (not just muted) — the vcam bridge freezes on the last frame while no
+   * bandwidth or decode is spent. Resume restarts the decode at mpv's
+   * position, so player and camera stay in sync.
+   */
   async pauseProgram() {
     if (this.status !== 'playing' || !this.programId) return;
     this.isPaused = true;
-    this.pipeline.pause();
+
     await this.monitor.setPause(true);
+    const pos = await this.monitor.getTimePos();
+    if (pos != null && this._currentStreams && !this._currentStreams.isLive) {
+      this.sources.savePosition(this.programId, pos);
+    }
+    this._pausedPos = pos;
+
+    // Freeze the camera on the last frame; stop decoding entirely.
+    this.pipeline.stopFfmpeg({ blank: false });
     this._setStatus('paused');
   }
 
@@ -192,21 +231,47 @@ class Switcher extends EventEmitter {
   async resumeProgram() {
     if (this.status !== 'paused' || !this.programId) return;
 
-    if (this._currentStreams && this._currentStreams.isLive) {
+    if (!this._currentStreams || this._currentStreams.isLive) {
       // Live: can't resume mid-stream, must restart from live edge
       this.isPaused = false;
       await this.setProgram(this.programId);
-    } else {
-      // VOD: unpause in place
-      this.isPaused = false;
-      this.pipeline.resume();
-      await this.monitor.setPause(false);
-      this._setStatus('playing');
+      return;
     }
+
+    // VOD: unpause mpv and restart the vcam decode at the same position.
+    this.isPaused = false;
+    const pos = (await this.monitor.getTimePos()) ?? this._pausedPos ?? 0;
+    const { speed } = this.store.state.settings;
+    this.pipeline.start(this._currentStreams.videoUrl, {
+      isLive: false,
+      seekTo: Math.max(0, pos),
+      speed: speed || 1,
+      userAgent: this._currentStreams.userAgent,
+    });
+    await this.monitor.setPause(false);
+    this._setStatus('playing');
   }
 
-  /** Change playback speed for both monitor and vcam pipeline. */
+  /** Persist the current VOD program position (fire-and-forget). */
+  _saveCurrentPosition() {
+    const id = this.programId;
+    if (!id || !this._currentStreams || this._currentStreams.isLive) return;
+    if (this.status !== 'playing' && this.status !== 'paused') return;
+    this.monitor
+      .getTimePos()
+      .then((pos) => {
+        if (pos != null) this.sources.savePosition(id, pos);
+      })
+      .catch(() => {});
+  }
+
+  /** Change playback speed for both monitor and vcam pipeline. VOD only —
+   *  live streams are pinned to 1× (real time has exactly one speed). */
   async setSpeed(speed) {
+    if (this._currentStreams && this._currentStreams.isLive) {
+      await this.monitor.setSpeed(1);
+      return;
+    }
     const spd = Math.max(0.1, Math.min(4.0, Number(speed) || 1));
     await this.monitor.setSpeed(spd);
     this.store.update((st) => (st.settings.speed = spd));
@@ -357,22 +422,29 @@ class Switcher extends EventEmitter {
         if (gen !== this._gen) return;
 
         this._currentStreams = streams;
-
-        // Restart pipeline
-        this.pipeline.start(streams.videoUrl, {
-          isLive: streams.isLive,
-          userAgent: streams.userAgent,
-        });
-
-        // Also reload monitor to keep A/V in sync after recovery
         const { volume, muted, speed } = this.store.state.settings;
-        await this.monitor.load(streams.videoUrl, streams.audioUrl, {
-          volume,
-          muted,
-          speed: speed || 1,
-          isLive: streams.isLive,
-          userAgent: streams.userAgent,
-        });
+
+        if (streams.isLive) {
+          // Live: restart both at the live edge with the fresh URL.
+          this.pipeline.start(streams.videoUrl, {
+            isLive: true,
+            userAgent: streams.userAgent,
+          });
+          await this.monitor.load(streams.videoUrl, streams.audioUrl, {
+            volume, muted, speed: 1, isLive: true, userAgent: streams.userAgent,
+          });
+        } else {
+          // VOD: only FFmpeg died — mpv is usually still playing fine.
+          // Restart the vcam decode at mpv's current position instead of
+          // yanking the whole program back to 0:00.
+          const pos = (await this.monitor.getTimePos()) || 0;
+          this.pipeline.start(streams.videoUrl, {
+            isLive: false,
+            seekTo: pos,
+            speed: speed || 1,
+            userAgent: streams.userAgent,
+          });
+        }
 
         if (gen !== this._gen) return;
         this._setStatus('playing');
@@ -403,6 +475,8 @@ class Switcher extends EventEmitter {
         message: 'Live stream has ended',
       });
     } else {
+      // VOD finished — clear the resume position so the next play starts over.
+      if (source) this.sources.savePosition(source.id, 0);
       this._setStatus('idle');
     }
   }

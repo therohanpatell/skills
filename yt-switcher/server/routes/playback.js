@@ -149,18 +149,19 @@ module.exports = async function playbackRoutes(app, { ctx }) {
   // ---- Monitor toggle ----
 
   app.post('/api/monitor/toggle', async () => {
-    if (monitor.enabled) {
-      monitor.stop();
-      store.update((st) => (st.settings.monitorEnabled = false));
-    } else {
+    // Toggling the monitor hides/shows the mpv WINDOW but never kills mpv:
+    // mpv is the only audio path, so "off" means audio-only, not silent.
+    // (Set YTSW_MONITOR_ENABLED=false to disable mpv entirely.)
+    if (!monitor.enabled) {
       monitor.start();
-      store.update((st) => (st.settings.monitorEnabled = true));
-      // Re-load current program if one is active
-      if (switcher.programId) {
-        switcher.setProgram(switcher.programId).catch(() => {});
-      }
+      // The pending program replays automatically once IPC connects.
+    } else {
+      const next = monitor.mode === 'audio-only' ? 'video-audio' : 'audio-only';
+      await monitor.setMode(next);
+      store.update((st) => (st.settings.monitorMode = next));
     }
-    return { ok: true, enabled: monitor.enabled };
+    store.update((st) => (st.settings.monitorEnabled = true));
+    return { ok: true, mode: monitor.mode };
   });
 
   // ---- VCam bridge reset ----

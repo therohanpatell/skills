@@ -388,18 +388,25 @@ class VcamPipeline extends EventEmitter {
     // Hardware acceleration
     if (hwaccel && hwaccel !== 'none') args.push('-hwaccel', hwaccel);
 
-    // Input flags: live vs VOD
+    // Input flags: live vs VOD.
+    // Live: smoothness beats latency for a vcam feed — no `nobuffer`, and
+    // start a few HLS segments behind the live edge so there is always a
+    // download cushion (this is what stops the fast/slow rubber-banding).
     if (isLive) {
       args.push(
-        '-fflags', '+discardcorrupt+nobuffer',
-        '-probesize', '500000',
-        '-analyzeduration', '500000',
-        '-rw_timeout', '5000000', // 5s network timeout
+        '-fflags', '+discardcorrupt',
+        '-probesize', '1000000',
+        '-analyzeduration', '1000000',
+        '-rw_timeout', '10000000', // 10s network timeout
       );
+      if (/m3u8/i.test(videoUrl)) {
+        args.push('-live_start_index', '-3');
+      }
     } else {
+      // 2 MB probe is plenty for googlevideo mp4/webm and shaves start-up time.
       args.push(
         '-fflags', '+discardcorrupt',
-        '-probesize', '5000000',
+        '-probesize', '2000000',
       );
     }
 
@@ -438,7 +445,9 @@ class VcamPipeline extends EventEmitter {
     args.push(
       '-map', '0:v:0', '-an',
       '-vf', [
-        `${speedFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=fast_bilinear`,
+        // force_divisible_by=2: NV12 requires even dimensions; an odd
+        // scaled size shifts the chroma plane and tints the image green.
+        `${speedFilter}scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear`,
         `pad=${width}:${height}:-1:-1:color=black`,
         `fps=${fps}`,
         'format=nv12',
@@ -451,7 +460,7 @@ class VcamPipeline extends EventEmitter {
     // ---- Output 2: low-res MJPEG for browser preview ----
     args.push(
       '-map', '0:v:0', '-an',
-      '-vf', `${speedFilter}scale=${p.width}:-2:flags=fast_bilinear,fps=${p.fps}`,
+      '-vf', `${speedFilter}scale=${p.width}:-2:force_divisible_by=2:flags=fast_bilinear,fps=${p.fps}`,
       '-c:v', 'mjpeg', '-q:v', String(p.quality),
       '-f', 'mjpeg', `tcp://127.0.0.1:${this._previewPort}`
     );
@@ -597,7 +606,13 @@ class VcamPipeline extends EventEmitter {
 
     this._perf.bufferSize = b.stdin.writableLength;
 
-    if (!b.stdin.write(frame) && sourceProc && sourceProc.stdout) {
+    // COPY the frame: stream writes queue the buffer by reference, and the
+    // ring buffer slot gets overwritten by later frames while the old bytes
+    // may still be sitting in the pipe's write queue. Sending an aliased
+    // buffer is what produced the intermittent green/corrupted camera frames.
+    const payload = Buffer.from(frame);
+
+    if (!b.stdin.write(payload) && sourceProc && sourceProc.stdout) {
       // Backpressure: pause FFmpeg output until the bridge drains
       sourceProc.stdout.pause();
       b.stdin.once('drain', () => {
