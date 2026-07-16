@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YT Switcher — Program Router</title>
+  <meta name="description" content="Lightweight YouTube video routing/switching system with Virtual Camera output">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -14,6 +15,7 @@
         <header class="panel-title">
           <span class="tally" id="programTally"></span> PROGRAM
           <span class="program-title" id="programSourceTitle"></span>
+          <span class="program-status" id="programStatus"></span>
         </header>
 
         <div class="program-screen" id="programScreen">
@@ -31,15 +33,38 @@
         </div>
 
         <div class="program-controls">
-          <button id="btnPlay"  class="ctl" title="Play">&#9654;</button>
+          <button id="btnPlay"  class="ctl" title="Play / Resume (Space)">&#9654;</button>
           <button id="btnPause" class="ctl" title="Pause">&#10073;&#10073;</button>
           <button id="btnStop"  class="ctl" title="Stop program">&#9632;</button>
           <span class="ctl-sep"></span>
-          <button id="btnMute" class="ctl" title="Mute / unmute">&#128266;</button>
+          <button id="btnMute" class="ctl" title="Mute / unmute (M)">&#128266;</button>
           <input id="volume" type="range" min="0" max="130" step="1" title="Volume">
           <span id="volumeLabel" class="volume-label">100</span>
           <span class="ctl-sep"></span>
-          <button id="btnFullscreen" class="ctl" title="Fullscreen preview">&#x26F6;</button>
+          <select id="speedSelect" class="ctl ctl-select" title="Playback speed">
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1.0x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="1.75">1.75x</option>
+            <option value="2">2.0x</option>
+          </select>
+          <span class="ctl-sep"></span>
+          <button id="btnFullscreen" class="ctl" title="Fullscreen preview (F)">&#x26F6;</button>
+        </div>
+
+        <!-- DVR Controls (VOD only) -->
+        <div class="dvr-controls" id="dvrControls">
+          <button id="btnSeekBack" class="ctl dvr-btn" title="Seek -10s (Left arrow)">⏪</button>
+          <span id="dvrTime" class="dvr-time">--:-- / --:--</span>
+          <div class="timeline-container">
+            <input id="dvrTimeline" type="range" min="0" max="100" step="0.1" value="0" title="Timeline scrub">
+            <div id="timelineTooltip" class="timeline-tooltip hidden">00:00</div>
+          </div>
+          <span id="dvrRemaining" class="dvr-remaining">--:--</span>
+          <button id="btnSeekFwd" class="ctl dvr-btn" title="Seek +10s (Right arrow)">⏩</button>
         </div>
       </section>
 
@@ -64,7 +89,7 @@
 
       <section class="side-block">
         <header class="panel-title">VIRTUAL CAMERA</header>
-        <div class="kv"><span>Device</span><b>OBS Virtual Camera</b></div>
+        <div class="kv"><span>Device</span><select id="vcamDeviceSelect" class="ctl ctl-select mini-select" title="Output Virtual Camera Device"></select></div>
         <div class="kv"><span>Format</span><b id="vcamFormat">—</b></div>
         <div class="kv"><span>Status</span><b id="vcamStatus" class="status-pill">—</b></div>
         <button id="btnVcamReset" class="mini-btn">Reset bridge</button>
@@ -74,6 +99,23 @@
         <header class="panel-title">MONITOR (mpv)</header>
         <div class="kv"><span>Status</span><b id="monitorStatus" class="status-pill">—</b></div>
         <button id="btnMonitorToggle" class="mini-btn">Toggle monitor window</button>
+      </section>
+
+      <!-- ================== PERFORMANCE PANEL ================== -->
+      <section class="side-block perf-panel">
+        <header class="panel-title">PERFORMANCE</header>
+        <div class="perf-grid">
+          <div class="kv"><span>Encoder</span><b id="perfEncoder" class="status-pill">idle</b></div>
+          <div class="kv"><span>Output FPS</span><b id="perfOutputFps" class="mono-val">—</b></div>
+          <div class="kv"><span>Render FPS</span><b id="perfRenderFps" class="mono-val">—</b></div>
+          <div class="kv"><span>Frame Time</span><b id="perfFrameTime" class="mono-val">—</b></div>
+          <div class="kv"><span>Dropped</span><b id="perfDropped" class="mono-val">0</b></div>
+          <div class="kv"><span>Skipped</span><b id="perfSkipped" class="mono-val">0</b></div>
+          <div class="kv"><span>Bitrate</span><b id="perfBitrate" class="mono-val">—</b></div>
+          <div class="kv"><span>Buffer</span><b id="perfBuffer" class="mono-val">—</b></div>
+          <div class="kv"><span>FFmpeg FPS</span><b id="perfFfmpegFps" class="mono-val">—</b></div>
+          <div class="kv"><span>Speed</span><b id="perfSpeed" class="mono-val">—</b></div>
+        </div>
       </section>
 
       <section class="side-block">
@@ -92,7 +134,36 @@
       </section>
 
       <footer class="conn" id="connState">connecting…</footer>
+      <div class="hotkey-hint" title="Press ? for keyboard shortcuts">⌨ Hotkeys</div>
     </aside>
+  </div>
+
+  <!-- Hotkey Legend Overlay -->
+  <div class="hotkey-overlay hidden" id="hotkeyOverlay">
+    <div class="hotkey-modal">
+      <header class="hotkey-header">
+        <h2>Keyboard Shortcuts</h2>
+        <button id="closeHotkeys" class="ctl" title="Close">✕</button>
+      </header>
+      <div class="hotkey-body">
+        <h3>Source Switching</h3>
+        <div class="hk-row"><kbd>Numpad 1-9</kbd><span>Switch to Source 1-9</span></div>
+        <div class="hk-row"><kbd>Numpad 0</kbd><span>Switch to Source 10</span></div>
+        <div class="hk-row"><kbd>A - J</kbd><span>Switch to Source 11-20</span></div>
+        <h3>Transport</h3>
+        <div class="hk-row"><kbd>Space</kbd><span>Play / Pause toggle</span></div>
+        <div class="hk-row"><kbd>Escape</kbd><span>Stop program</span></div>
+        <div class="hk-row"><kbd>M</kbd><span>Mute / Unmute</span></div>
+        <div class="hk-row"><kbd>F</kbd><span>Fullscreen preview</span></div>
+        <h3>DVR (VOD only)</h3>
+        <div class="hk-row"><kbd>←</kbd><span>Seek -10 seconds</span></div>
+        <div class="hk-row"><kbd>→</kbd><span>Seek +10 seconds</span></div>
+        <div class="hk-row"><kbd>Shift+←</kbd><span>Seek -30 seconds</span></div>
+        <div class="hk-row"><kbd>Shift+→</kbd><span>Seek +30 seconds</span></div>
+        <h3>General</h3>
+        <div class="hk-row"><kbd>?</kbd><span>Toggle this help</span></div>
+      </div>
+    </div>
   </div>
 
   <template id="cardTemplate">
@@ -101,6 +172,7 @@
         <img alt="" draggable="false" loading="lazy">
         <div class="thumb-fallback">▶</div>
         <span class="live-badge">LIVE</span>
+        <span class="card-index"></span>
         <span class="spinner"></span>
         <span class="error-badge" title=""></span>
       </div>

@@ -26,4 +26,15 @@ export const api = {
   toggleMonitor: () => request('POST', '/api/monitor/toggle'),
   resetVcam: () => request('POST', '/api/vcam/reset'),
   getState: () => request('GET', '/api/state'),
+
+  // DVR Controls
+  seekForward: (secs = 10) => request('POST', '/api/playback', { action: 'seek-forward', value: secs }),
+  seekBackward: (secs = 10) => request('POST', '/api/playback', { action: 'seek-backward', value: secs }),
+  seekTo: (seconds) => request('POST', '/api/playback', { action: 'seek-to', value: seconds }),
+  seekPercent: (pct) => request('POST', '/api/playback', { action: 'seek-percent', value: pct }),
+
+  // Audio device & Speed
+  setAudioDevice: (device) => request('POST', '/api/playback', { action: 'audio-device', value: device }),
+  setVcamDevice: (device) => request('POST', '/api/playback', { action: 'vcam-device', value: device }),
+  setSpeed: (speed) => request('POST', '/api/playback', { action: 'speed', value: speed }),
 };
