@@ -88,6 +88,7 @@ class StatsMonitor extends EventEmitter {
         encoderStatus: perf.encoderStatus || 'idle',
         ffmpegFps: perf.ffmpegFps || 0,
         ffmpegSpeed: perf.ffmpegSpeed || '0x',
+        positionSec: perf.positionSec || 0,
       },
     });
   }

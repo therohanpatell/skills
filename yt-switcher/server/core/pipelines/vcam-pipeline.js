@@ -164,10 +164,13 @@ class VcamPipeline extends EventEmitter {
       encoderStatus: 'idle',
       ffmpegFps: 0,
       ffmpegSpeed: '0x',
+      positionSec: 0,
     };
     this._frameTimes = [];
     this._lastFrameTime = 0;
     this._perfInterval = null;
+    this._seekBase = 0;   // -ss offset of the current decode
+    this._posSpeed = 1;   // setpts factor: source-seconds per output-second
 
     // ---- Virtual camera bridge (persistent, supervised) ----
     this._initBridge();
@@ -343,6 +346,11 @@ class VcamPipeline extends EventEmitter {
     return { ...this._perf };
   }
 
+  /** Current decode position in source seconds (0 when idle/live). */
+  get positionSec() {
+    return this._perf.positionSec || 0;
+  }
+
   /* ================================================================
    *  FFmpeg Lifecycle
    * ================================================================ */
@@ -373,6 +381,9 @@ class VcamPipeline extends EventEmitter {
     this._perf.skippedFrames = 0;
     this._perf.totalFrames = 0;
     this._perf.encoderStatus = 'starting';
+    this._seekBase = (!isLive && seekTo > 0) ? seekTo : 0;
+    this._posSpeed = (!isLive && Number(speed) > 0) ? Number(speed) : 1;
+    this._perf.positionSec = this._seekBase;
 
     const gen = ++this._gen;
     const { width, height, fps } = config.vcam;
@@ -408,6 +419,12 @@ class VcamPipeline extends EventEmitter {
         '-fflags', '+discardcorrupt',
         '-probesize', '2000000',
       );
+      // CRITICAL: pace VOD input at (speed ×) real time. Without this FFmpeg
+      // decodes a file/URL flat out (observed 4.7×/280fps), overflowing the
+      // bridge queue whose drop-oldest policy then fast-forwards the camera.
+      // Live streams are paced by the source and must NOT be rate-limited.
+      const rate = Number(speed) > 0 ? Number(speed) : 1;
+      args.push('-readrate', String(rate));
     }
 
     // VOD seek position (input seek with accurate_seek)
@@ -511,6 +528,16 @@ class VcamPipeline extends EventEmitter {
         case 'fps':
           this._perf.ffmpegFps = parseFloat(val) || 0;
           break;
+        case 'out_time_ms': {
+          // Misnamed by ffmpeg: the value is in MICROseconds. Combined with
+          // the -ss base this is the true program position of the vcam
+          // decode — the timeline/pause/seek fallback when mpv is absent.
+          const us = parseInt(val, 10);
+          if (Number.isFinite(us) && us >= 0) {
+            this._perf.positionSec = this._seekBase + (us / 1e6) * this._posSpeed;
+          }
+          break;
+        }
         case 'bitrate':
           this._perf.videoBitrate = val || '0 kbps';
           break;

@@ -102,12 +102,12 @@ class SourceManager extends EventEmitter {
    * Run yt-dlp for a source, updating metadata + resolved stream URLs.
    * Safe to call repeatedly; concurrent calls for the same id are coalesced.
    */
-  async resolve(id) {
+  async resolve(id, { liveMaxHeight = null } = {}) {
     const source = this.get(id);
     const rt = this.runtime.get(id);
     if (rt && rt.status === 'resolving' && rt.promise) return rt.promise;
 
-    const promise = this._doResolve(source);
+    const promise = this._doResolve(source, { liveMaxHeight });
     this._setRuntime(id, { status: 'resolving', error: null, promise });
     try {
       const info = await promise;
@@ -122,7 +122,7 @@ class SourceManager extends EventEmitter {
     }
   }
 
-  async _doResolve(source) {
+  async _doResolve(source, { liveMaxHeight = null } = {}) {
     const args = [
       '--no-warnings',
       '--no-playlist',
@@ -175,7 +175,10 @@ class SourceManager extends EventEmitter {
     // guaranteed (no split-stream sync issues) and bandwidth is halved vs
     // 1080p — the stability the vcam path needs matters more than pixels.
     if (isLive && Array.isArray(json.formats)) {
-      const maxH = config.resolve.maxLiveHeight || 720;
+      // liveMaxHeight override: the Switcher degrades to a lower variant
+      // (config degradedLiveHeight, default 480p) when a live stream keeps
+      // failing or starving on a slow connection.
+      const maxH = liveMaxHeight || config.resolve.maxLiveHeight || 1080;
       const muxed = json.formats.filter(
         (f) => f.url && f.vcodec && f.vcodec !== 'none' &&
                f.acodec && f.acodec !== 'none' &&
@@ -217,11 +220,11 @@ class SourceManager extends EventEmitter {
    * or older than the freshness window (YouTube URLs expire after ~6h; live
    * manifests sooner). `force` bypasses the cache (used after a 403).
    */
-  async getFreshStreams(id, { force = false } = {}) {
+  async getFreshStreams(id, { force = false, liveMaxHeight = null } = {}) {
     const entry = this.resolved.get(id);
     const maxAge = entry && entry.isLive ? config.resolve.liveRefreshMs : config.resolve.vodRefreshMs;
-    if (!force && entry && Date.now() - entry.resolvedAt < maxAge) return entry;
-    return this.resolve(id);
+    if (!force && !liveMaxHeight && entry && Date.now() - entry.resolvedAt < maxAge) return entry;
+    return this.resolve(id, { liveMaxHeight });
   }
 
   /**

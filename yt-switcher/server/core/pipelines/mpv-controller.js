@@ -33,6 +33,7 @@
  */
 
 const net = require('net');
+const path = require('path');
 const { EventEmitter } = require('events');
 const config = require('../../lib/config');
 const logger = require('../../lib/logger');
@@ -126,6 +127,9 @@ class MpvController extends EventEmitter {
       '--idle=yes',         // Start idle, wait for loadfile commands
       '--keep-open=yes',    // Don't exit when playback ends
       '--no-terminal',      // No terminal output (we use IPC)
+      // mpv's own log — the first place to look when playback misbehaves.
+      `--log-file=${path.join(config.paths.logDir, 'mpv.log')}`,
+      '--msg-level=all=warn',
 
       // Speed lock — mechanism 1 of 4
       '--speed=1',
@@ -178,7 +182,11 @@ class MpvController extends EventEmitter {
 
   get status() {
     if (!this.enabled) return 'disabled';
-    return this.sock ? 'running' : this.proc.status;
+    // "running" means we can actually CONTROL mpv. A spawned process with
+    // no IPC connection is "starting" (or worse) — showing "running" there
+    // hid every no-audio/no-timeline failure behind a green pill.
+    if (this.sock) return 'running';
+    return this.proc.status === 'running' ? 'starting' : this.proc.status;
   }
 
   /**
@@ -212,7 +220,13 @@ class MpvController extends EventEmitter {
     if (!this.enabled || !this.proc.proc) return;
 
     if (Date.now() - startedAt > IPC_TIMEOUT_MS) {
-      logger.error('mpv IPC connect timed out');
+      // A running mpv we cannot talk to is useless (no load, no audio, no
+      // props). Kill it — the supervisor respawns it and we try again; the
+      // circuit breaker stops a hopeless loop and surfaces 'failed' in the UI.
+      logger.error('mpv IPC connect timed out — restarting mpv');
+      if (this.proc.proc) {
+        try { this.proc.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
+      }
       return;
     }
 
@@ -420,30 +434,42 @@ class MpvController extends EventEmitter {
       await this.command(['set_property', 'cache-secs', 30]);
     }
 
-    // ---- Build loadfile options as comma-separated string ----
-    // mpv's JSON IPC expects options as a single string: "key1=val1,key2=val2"
-    // Passing a JS array silently fails — this was the root cause of audio
-    // tracks not loading in the old implementation.
-    const optParts = [`speed=${spd}`];
-    if (audioUrl) {
-      optParts.push(`audio-file=${audioUrl}`);
-      optParts.push('aid=1');
-    }
-    if (userAgent) {
-      optParts.push(`user-agent=${userAgent}`);
-    }
-    if (startAt > 0 && !isLive) {
-      optParts.push(`start=${Math.floor(startAt)}`);
-    }
+    // ---- Set options that contain arbitrary text via set_property ----
+    // NEVER put URLs or the User-Agent inside the loadfile options string:
+    // it is comma-separated, and web-client UAs literally contain
+    // "(KHTML, like Gecko)" — the embedded comma corrupts the options and
+    // makes mpv reject the ENTIRE loadfile (no video, no audio, no props).
+    await this.command(['set_property', 'user-agent', userAgent || '']);
+    await this.command(['set_property', 'speed', spd]);
 
-    // ---- Load the file ----
-    await this.command(['loadfile', videoUrl, 'replace', optParts.join(',')]);
+    // ---- Load the file (options string carries only safe numeric keys) ----
+    const loadOpts = startAt > 0 && !isLive ? `start=${Math.floor(startAt)}` : '';
+    const loadArgs = loadOpts
+      ? ['loadfile', videoUrl, 'replace', loadOpts]
+      : ['loadfile', videoUrl, 'replace'];
+    const res = await this.command(loadArgs);
+    if (!res) {
+      logger.warn('mpv loadfile got no reply (IPC down?) — will replay on reconnect');
+      return;
+    }
+    if (res.error !== 'success') {
+      logger.warn({ error: res.error }, 'mpv rejected loadfile');
+    }
 
     // ---- Wait for mpv to initialize the new file's audio pipeline ----
     // Without this delay, volume/mute commands arrive before mpv has set up
-    // audio for the new file, and are silently dropped. This was the root
-    // cause of "need to click mute/unmute multiple times".
+    // audio for the new file, and are silently dropped.
     await new Promise((r) => setTimeout(r, AUDIO_SETTLE_MS));
+
+    // ---- External audio track (VOD split streams) via audio-add ----
+    // audio-add at runtime is the robust path: the URL is a standalone
+    // argument, immune to option-string parsing.
+    if (audioUrl) {
+      const ar = await this.command(['audio-add', audioUrl, 'select']);
+      if (ar && ar.error !== 'success') {
+        logger.warn({ error: ar.error }, 'mpv audio-add failed');
+      }
+    }
 
     // ---- Set playback state AFTER load ----
     await this.command(['set_property', 'pause', false]);

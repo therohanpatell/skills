@@ -80,20 +80,16 @@ class Switcher extends EventEmitter {
     this.pipeline.on('exit', (info) => this._onPipelineLost(info));
     this.monitor.on('ended', () => this._onStreamEnded());
 
-    // Track VOD playback position (throttled) so pause/switch/restart can
-    // resume from where the viewer left off.
-    this._lastPosSaveAt = 0;
-    this.monitor.on('props', (props) => {
-      const pos = props['time-pos'];
-      if (
-        pos != null && this.status === 'playing' && this.programId &&
-        this._currentStreams && !this._currentStreams.isLive &&
-        Date.now() - this._lastPosSaveAt > 5000
-      ) {
-        this._lastPosSaveAt = Date.now();
-        this.sources.savePosition(this.programId, pos);
-      }
-    });
+    // Track VOD playback position so pause/switch/restart resume from where
+    // the viewer left off. Polled (not event-driven) because the position
+    // must keep being saved even when mpv is unavailable — _getPosition()
+    // falls back to FFmpeg's own progress clock.
+    this._posTimer = setInterval(async () => {
+      if (this.status !== 'playing' || !this.programId) return;
+      if (!this._currentStreams || this._currentStreams.isLive) return;
+      const pos = await this._getPosition();
+      if (pos != null && pos > 0) this.sources.savePosition(this.programId, pos);
+    }, 5000);
 
     // Periodic URL freshness check
     this._refreshTimer = setInterval(() => this._checkUrlFreshness(), REFRESH_CHECK_MS);
@@ -216,7 +212,7 @@ class Switcher extends EventEmitter {
     this.isPaused = true;
 
     await this.monitor.setPause(true);
-    const pos = await this.monitor.getTimePos();
+    const pos = await this._getPosition();
     if (pos != null && this._currentStreams && !this._currentStreams.isLive) {
       this.sources.savePosition(this.programId, pos);
     }
@@ -240,7 +236,10 @@ class Switcher extends EventEmitter {
 
     // VOD: unpause mpv and restart the vcam decode at the same position.
     this.isPaused = false;
-    const pos = (await this.monitor.getTimePos()) ?? this._pausedPos ?? 0;
+    const source = this.store.state.sources.find((s) => s.id === this.programId);
+    const pos = this._pausedPos ??
+      (source && source.positionSec) ??
+      (await this._getPosition()) ?? 0;
     const { speed } = this.store.state.settings;
     this.pipeline.start(this._currentStreams.videoUrl, {
       isLive: false,
@@ -252,13 +251,23 @@ class Switcher extends EventEmitter {
     this._setStatus('playing');
   }
 
+  /**
+   * Current playback position in seconds: mpv when it's reachable,
+   * otherwise the FFmpeg decode's own progress clock. Null when unknown.
+   */
+  async _getPosition() {
+    const mpvPos = await this.monitor.getTimePos();
+    if (mpvPos != null && mpvPos > 0) return mpvPos;
+    const ffPos = this.pipeline.positionSec;
+    return ffPos > 0 ? ffPos : null;
+  }
+
   /** Persist the current VOD program position (fire-and-forget). */
   _saveCurrentPosition() {
     const id = this.programId;
     if (!id || !this._currentStreams || this._currentStreams.isLive) return;
     if (this.status !== 'playing' && this.status !== 'paused') return;
-    this.monitor
-      .getTimePos()
+    this._getPosition()
       .then((pos) => {
         if (pos != null) this.sources.savePosition(id, pos);
       })
@@ -333,7 +342,8 @@ class Switcher extends EventEmitter {
     if (!this.programId || !this._currentStreams) return;
     if (this._currentStreams.isLive) return;
 
-    const dur = await this.monitor.getDuration();
+    const source = this.store.state.sources.find((s) => s.id === this.programId);
+    const dur = (await this.monitor.getDuration()) || (source && source.duration) || 0;
     if (dur && dur > 0) {
       const targetPos = (Math.max(0, Math.min(100, Number(percent) || 0)) / 100) * dur;
       await this.seekTo(targetPos);
@@ -353,7 +363,7 @@ class Switcher extends EventEmitter {
     if (!this.programId || !this._currentStreams) return;
     if (this._currentStreams.isLive) return;
 
-    const currentPos = await this.monitor.getTimePos();
+    const currentPos = await this._getPosition();
     const targetPos = Math.max(0, (currentPos || 0) + Number(seconds));
     await this.seekTo(targetPos);
   }
@@ -400,6 +410,13 @@ class Switcher extends EventEmitter {
 
     this._retryCount = attempt + 1;
 
+    // A live stream that keeps dying is usually starving the connection:
+    // from the 3rd attempt onward re-resolve at the degraded height (480p)
+    // instead of retrying the same too-heavy variant.
+    const degrade = isLive && this._retryCount >= 3
+      ? config.resolve.degradedLiveHeight || 480
+      : null;
+
     // Live streams retry faster; VOD uses graduated delays
     const delay = isLive
       ? Math.min(RETRY_DELAYS[0], 2000)
@@ -418,6 +435,7 @@ class Switcher extends EventEmitter {
         // VOD: only force if it crashed quickly (likely a 403)
         const streams = await this.sources.getFreshStreams(id, {
           force: isLive || uptimeMs < FAST_EXIT_MS,
+          liveMaxHeight: degrade,
         });
         if (gen !== this._gen) return;
 
@@ -544,6 +562,7 @@ class Switcher extends EventEmitter {
   shutdown() {
     this._gen++;
     clearInterval(this._refreshTimer);
+    clearInterval(this._posTimer);
     clearTimeout(this._retryTimer);
   }
 }

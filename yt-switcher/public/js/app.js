@@ -325,15 +325,28 @@ function renderStats(stats) {
   if (stats.performance) {
     renderPerformance(stats.performance);
 
-    // Fallback: if mpv properties aren't flowing (monitor audio-only or
-    // briefly restarting), keep the Program info bar alive from FFmpeg's
-    // own progress stats instead of showing blanks.
-    const playing = state && state.program && state.program.status === 'playing';
+    // Fallback: if mpv playback properties aren't flowing (mpv restarting,
+    // rejected load, audio-only quirks), drive the info bar AND the DVR
+    // timeline from FFmpeg's own progress clock instead of showing blanks.
+    const playing = state && state.program &&
+      (state.program.status === 'playing' || state.program.status === 'paused');
     if (playing && Date.now() - lastMpvPropsAt > 3000) {
       const p = stats.performance;
       if (p.ffmpegFps > 0) setText(els.infoFps, `${p.ffmpegFps.toFixed(1)} fps`);
       if (p.videoBitrate && p.videoBitrate !== '0 kbps') {
         setText(els.infoBuffer, p.videoBitrate);
+      }
+      const source = state.sources.find((s) => s.id === state.program.programId);
+      const pos = p.positionSec || 0;
+      const dur = (source && source.duration) || 0;
+      if (pos > 0) setText(els.infoTime, fmtTime(pos));
+      if (source && !source.isLive && dur > 0) {
+        lastKnownDuration = dur;
+        if (!dvrScrubbing && !dvrSeeking) {
+          els.dvrTimeline.value = Math.min(100, (pos / dur) * 100);
+          setText(els.dvrTime, `${fmtTime(pos)} / ${fmtTime(dur)}`);
+          setText(els.dvrRemaining, `-${fmtTime(Math.max(0, dur - pos))}`);
+        }
       }
     }
   }
@@ -359,7 +372,10 @@ function renderPerformance(perf) {
 }
 
 function renderMpvProps(props) {
-  lastMpvPropsAt = Date.now();
+  // Only count props as "flowing" when they carry real playback data —
+  // an idle mpv still answers polls, just with empty values, and that
+  // must not suppress the FFmpeg-clock fallback below.
+  if (props['time-pos'] != null) lastMpvPropsAt = Date.now();
   const vp = props['video-params'];
   setText(els.infoRes, vp && vp.w ? `${vp.w}×${vp.h}` : '—');
   const fps = props['estimated-vf-fps'];
