@@ -62,6 +62,7 @@ function buildConfig() {
     vcam: {
       ...defaults.vcam,
       enabled: envBool('YTSW_VCAM_ENABLED', defaults.vcam.enabled),
+      device: env('YTSW_VCAM_DEVICE', defaults.vcam.device),
       width: envInt('YTSW_VCAM_WIDTH', defaults.vcam.width),
       height: envInt('YTSW_VCAM_HEIGHT', defaults.vcam.height),
       fps: envInt('YTSW_VCAM_FPS', defaults.vcam.fps),
@@ -69,6 +70,12 @@ function buildConfig() {
     monitor: {
       ...defaults.monitor,
       enabled: envBool('YTSW_MONITOR_ENABLED', defaults.monitor.enabled),
+      mode: env('YTSW_MONITOR_MODE', defaults.monitor.mode),
+    },
+    audioLoopback: {
+      ...defaults.audioLoopback,
+      enabled: envBool('YTSW_AUDIO_LOOPBACK', defaults.audioLoopback.enabled),
+      device: env('YTSW_AUDIO_DEVICE', defaults.audioLoopback.device),
     },
     ffmpeg: {
       ...defaults.ffmpeg,

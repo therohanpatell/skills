@@ -53,7 +53,14 @@ class ManagedProcess extends EventEmitter {
     this.status = 'running';
     this._delay = config.supervisor.restartBaseDelayMs;
 
+    if (this.proc.stdin) {
+      this.proc.stdin.on('error', () => {});
+    }
+    if (this.proc.stdout) {
+      this.proc.stdout.on('error', () => {});
+    }
     if (this.proc.stderr) {
+      this.proc.stderr.on('error', () => {});
       let buf = '';
       this.proc.stderr.on('data', (d) => {
         buf += d.toString();

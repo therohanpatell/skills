@@ -15,7 +15,9 @@ const DEFAULT_STATE = {
   settings: {
     volume: 100,
     muted: false,
+    speed: 1,
     monitorEnabled: null, // null = follow config default
+    vcamDevice: null,     // null = follow default plugin device
   },
 };
 

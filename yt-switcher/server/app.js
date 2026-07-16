@@ -60,6 +60,7 @@ async function buildApp(ctx) {
   ctx.sources.on('sourceChanged', pushState);
   ctx.switcher.on('programChanged', pushState);
   ctx.pipeline.on('bridgeStatus', pushState);
+  ctx.pipeline.on('perfUpdate', (perf) => broadcast('perfUpdate', perf));
   ctx.monitor.on('status', pushState);
   ctx.monitor.on('props', (props) => broadcast('mpvProps', props));
   ctx.stats.on('stats', (stats) => broadcast('stats', stats));

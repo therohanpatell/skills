@@ -16,20 +16,26 @@
   },
   "vcam": {
     "enabled": true,
-    "width": 1280,
-    "height": 720,
-    "fps": 30,
+    "device": "OBS Virtual Camera",
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
     "pixelFormat": "nv12"
   },
   "preview": {
-    "width": 640,
-    "fps": 12,
+    "width": 480,
+    "fps": 10,
     "quality": 8
   },
   "monitor": {
     "enabled": true,
     "audioDevice": "auto",
-    "hwdec": "auto-safe"
+    "hwdec": "auto-safe",
+    "mode": "video-audio"
+  },
+  "audioLoopback": {
+    "enabled": false,
+    "device": "auto"
   },
   "ffmpeg": {
     "hwaccel": "d3d11va",
@@ -42,7 +48,7 @@
     "maxVideoHeight": 1080
   },
   "stats": {
-    "intervalMs": 2000
+    "intervalMs": 1000
   },
   "supervisor": {
     "restartBaseDelayMs": 1000,

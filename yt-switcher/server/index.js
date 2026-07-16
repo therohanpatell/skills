@@ -4,8 +4,8 @@ const config = require('./lib/config');
 const logger = require('./lib/logger');
 const { StateStore } = require('./core/state-store');
 const { SourceManager } = require('./core/source-manager');
-const { MediaPipeline } = require('./core/pipelines/media-pipeline');
-const { MpvMonitor } = require('./core/pipelines/mpv-monitor');
+const { VcamPipeline } = require('./core/pipelines/vcam-pipeline');
+const { MpvController } = require('./core/pipelines/mpv-controller');
 const { Switcher } = require('./core/switcher');
 const { StatsMonitor } = require('./core/stats-monitor');
 const { buildApp } = require('./app');
@@ -15,16 +15,19 @@ async function main() {
 
   const store = new StateStore();
   const sources = new SourceManager(store);
-  const pipeline = new MediaPipeline();
-  const monitor = new MpvMonitor();
+  const pipeline = new VcamPipeline(store);
+  const monitor = new MpvController();
   const switcher = new Switcher({ store, sources, pipeline, monitor });
 
-  const stats = new StatsMonitor(() => ({
-    server: process.pid,
-    ffmpeg: pipeline.ffmpeg ? pipeline.ffmpeg.pid : null,
-    vcam: pipeline.bridge ? pipeline.bridge.pid : null,
-    mpv: monitor.pid,
-  }));
+  const stats = new StatsMonitor(
+    () => ({
+      server: process.pid,
+      ffmpeg: pipeline.ffmpeg ? pipeline.ffmpeg.pid : null,
+      vcam: pipeline.bridge ? pipeline.bridge.pid : null,
+      mpv: monitor.pid,
+    }),
+    () => pipeline.getPerformanceMetrics()
+  );
 
   const ctx = {
     store,
@@ -38,7 +41,13 @@ async function main() {
         sources: sources.list(),
         program: switcher.snapshot(),
         settings: store.state.settings,
-        vcam: { ...config.vcam, status: pipeline.bridgeStatus },
+        vcam: {
+          ...config.vcam,
+          status: pipeline.bridgeStatus,
+          device: pipeline.currentDevice,
+          availableDevices: pipeline.availableDevices,
+          notification: pipeline.notification,
+        },
         monitor: { status: monitor.status },
         limits: config.limits,
       };

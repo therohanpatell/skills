@@ -10,20 +10,27 @@ const logger = require('../lib/logger');
 /**
  * Samples CPU/RAM for every process in the pipeline plus GPU utilization
  * (NVIDIA only — nvidia-smi is the sole vendor tool that is reliably
- * scriptable; other GPUs show "n/a"). Emits 'stats' on each tick, which the
- * app broadcasts over the WebSocket — the UI never polls.
+ * scriptable; other GPUs show "n/a"). Also aggregates real-time performance
+ * metrics from the MediaPipeline for the performance panel.
+ *
+ * Emits 'stats' on each tick, which the app broadcasts over the WebSocket —
+ * the UI never polls.
  */
 class StatsMonitor extends EventEmitter {
-  /** @param {() => Record<string, number|null>} getPids returns {label: pid} */
-  constructor(getPids) {
+  /**
+   * @param {() => Record<string, number|null>} getPids returns {label: pid}
+   * @param {() => object} getPerfMetrics returns pipeline performance metrics
+   */
+  constructor(getPids, getPerfMetrics) {
     super();
     this.getPids = getPids;
+    this.getPerfMetrics = getPerfMetrics || (() => ({}));
     this._timer = null;
     this._nvidiaSmi = undefined; // undefined = not probed yet
   }
 
   start() {
-    this._timer = setInterval(() => this._sample().catch(() => {}), config.stats.intervalMs);
+    this._timer = setInterval(() => this._sample().catch(() => { }), config.stats.intervalMs);
   }
 
   stop() {
@@ -54,15 +61,34 @@ class StatsMonitor extends EventEmitter {
       }
     }
 
+    const gpu = await this._sampleGpu();
+    const perf = this.getPerfMetrics();
+
     this.emit('stats', {
       processes,
       appCpu: round1(cpuTotal),
       appRamMb: Math.round(ramTotal / 1048576),
       system: {
+        cpuCount: os.cpus().length,
         ramUsedMb: Math.round((os.totalmem() - os.freemem()) / 1048576),
         ramTotalMb: Math.round(os.totalmem() / 1048576),
       },
-      gpu: await this._sampleGpu(),
+      gpu,
+      // Performance panel metrics from the media pipeline
+      performance: {
+        outputFps: perf.outputFps || 0,
+        renderFps: perf.renderFps || 0,
+        frameTimeMs: perf.frameTimeMs || 0,
+        droppedFrames: perf.droppedFrames || 0,
+        skippedFrames: perf.skippedFrames || 0,
+        totalFrames: perf.totalFrames || 0,
+        videoBitrate: perf.videoBitrate || '0 kbps',
+        audioBitrate: perf.audioBitrate || '0 kbps',
+        bufferSize: perf.bufferSize || 0,
+        encoderStatus: perf.encoderStatus || 'idle',
+        ffmpegFps: perf.ffmpegFps || 0,
+        ffmpegSpeed: perf.ffmpegSpeed || '0x',
+      },
     });
   }
 
@@ -71,7 +97,7 @@ class StatsMonitor extends EventEmitter {
     return new Promise((resolve) => {
       execFile(
         'nvidia-smi',
-        ['--query-gpu=utilization.gpu,utilization.decoder,memory.used', '--format=csv,noheader,nounits'],
+        ['--query-gpu=utilization.gpu,utilization.decoder,memory.used,memory.total', '--format=csv,noheader,nounits'],
         { timeout: 3000, windowsHide: true },
         (err, stdout) => {
           if (err) {
@@ -82,8 +108,13 @@ class StatsMonitor extends EventEmitter {
             return resolve(null);
           }
           this._nvidiaSmi = true;
-          const [gpu, decoder, mem] = stdout.trim().split(',').map((s) => parseFloat(s));
-          resolve({ utilization: gpu, decoder, memMb: mem });
+          const parts = stdout.trim().split(',').map((s) => parseFloat(s.trim()));
+          resolve({
+            utilization: parts[0] || 0,
+            decoder: parts[1] || 0,
+            memMb: parts[2] || 0,
+            memTotalMb: parts[3] || 0,
+          });
         }
       );
     });

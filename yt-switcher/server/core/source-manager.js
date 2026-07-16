@@ -126,6 +126,7 @@ class SourceManager extends EventEmitter {
     const args = [
       '--no-warnings',
       '--no-playlist',
+      '--extractor-args', 'youtube:player_client=android,web',
       '-f',
       `bestvideo[height<=${config.resolve.maxVideoHeight}]+bestaudio/best[height<=${config.resolve.maxVideoHeight}]/best`,
       '-j',
@@ -171,7 +172,8 @@ class SourceManager extends EventEmitter {
     }
 
     const isLive = Boolean(json.is_live);
-    this.resolved.set(source.id, { videoUrl, audioUrl, isLive, resolvedAt: Date.now() });
+    const userAgent = (json.http_headers && json.http_headers['User-Agent']) || null;
+    this.resolved.set(source.id, { videoUrl, audioUrl, isLive, userAgent, resolvedAt: Date.now() });
 
     this.store.update((st) => {
       const s = st.sources.find((x) => x.id === source.id);
