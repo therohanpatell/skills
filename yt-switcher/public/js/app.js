@@ -524,9 +524,11 @@ $('btnAudioTest').addEventListener('click', async () => {
     const r = await api.audioTest();
     out.textContent = [
       `tone: ${r.toneTest}`,
+      `mpv path: ${r.mpvPath}`,
       `mpv: ${r.mpvVersion}`,
       `mpv control (IPC): ${r.ipcConnected ? 'connected' : 'NOT CONNECTED — this is why there is no audio'}`,
       `monitor status: ${r.monitorStatus}`,
+      ...(r.binaryNotes && r.binaryNotes.length ? ['', 'warnings:', ...r.binaryNotes] : []),
       '',
       'mpv.log tail:',
       ...(r.mpvLogTail || []),

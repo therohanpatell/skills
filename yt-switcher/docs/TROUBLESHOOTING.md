@@ -53,9 +53,27 @@ Logs: `logs/app.log` (JSON lines). Raise verbosity with `YTSW_LOG_LEVEL=debug`.
 - Lower `resolve.maxVideoHeight` to 720 in `config/default.json`.
 
 **No audio**
-- Audio comes from the mpv monitor window — MONITOR status must be `running`
-  and not muted. The virtual camera itself never carries audio (Windows
-  platform limitation for all vcams); see INSTALL.md for VB-Cable routing.
+- Click **🔊 Test audio (beep)** in the side panel first — it pinpoints the
+  culprit in one shot:
+  - `mpv: ERROR: mpv not found` → set `YTSW_MPV_PATH` in `.env` to the full
+    exe path (e.g. `C:\Tools\mpv\mpv.exe`) and **restart the server** —
+    `.env` is only read at startup. Common folders (C:\Tools\mpv,
+    Program Files, winget/scoop/choco) are also auto-detected.
+  - beep NOT audible → Windows output-device problem, not the app.
+  - `IPC: NOT CONNECTED` with a valid mpv version → check the mpv.log tail
+    shown under the button.
+- MONITOR status must be `running` and not muted. The virtual camera itself
+  never carries audio (Windows platform limitation for ALL virtual cameras).
+
+**Audio in OBS's mixer**
+- The vcam is video-only, so no meter will ever move for the Video Capture
+  Device source. Program audio reaches OBS one of two ways:
+  1. **Desktop Audio** (default): once mpv plays through your speakers, the
+     Desktop Audio meter moves — nothing to configure.
+  2. **Dedicated source**: install VB-Audio Cable, set
+     `monitor.audioDevice` to the CABLE Input device (see INSTALL.md), and
+     add an OBS *Audio Input Capture* source using **CABLE Output**. Same
+     recipe feeds audio into Teams/Zoom.
 
 **mpv window closed by accident**
 - The supervisor restarts it automatically within seconds. If status is

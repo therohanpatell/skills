@@ -37,11 +37,68 @@ function envInt(name, fallback) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+/**
+ * Resolve an external tool to something spawnable.
+ *  - A configured path that exists on disk is used as-is.
+ *  - A bare command name is accepted if `where`/`which` finds it on PATH.
+ *  - Otherwise, well-known install locations are probed (winget, scoop,
+ *    chocolatey, Program Files, C:\Tools) so a missing PATH entry doesn't
+ *    silently kill the whole audio/monitor subsystem.
+ * Returns { path, note } — note is a human-readable warning for the log/UI.
+ */
+function findBinary(configured, candidates) {
+  const looksLikePath = /[\\/]/.test(configured);
+  if (looksLikePath) {
+    if (fs.existsSync(configured)) return { path: configured, note: null };
+  } else {
+    const probe = process.platform === 'win32' ? 'where' : 'which';
+    try {
+      require('child_process').execSync(`${probe} ${configured}`, {
+        stdio: 'pipe',
+        windowsHide: true,
+      });
+      return { path: configured, note: null };
+    } catch (_) {
+      /* not on PATH — fall through to candidates */
+    }
+  }
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) {
+      return { path: c, note: `'${configured}' not found — auto-detected ${c}` };
+    }
+  }
+  return {
+    path: configured,
+    note: looksLikePath
+      ? `configured path does not exist: ${configured}`
+      : `'${configured}' not found on PATH and no known install location — set the YTSW_*_PATH in .env (and RESTART the server)`,
+  };
+}
+
+function windowsCandidates(exe, extraDirs = []) {
+  if (process.platform !== 'win32') return [];
+  const dirs = [
+    ...extraDirs,
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links'),
+    process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'scoop', 'shims'),
+    'C:\\ProgramData\\chocolatey\\bin',
+  ].filter(Boolean);
+  return dirs.map((d) => path.join(d, exe));
+}
+
 function buildConfig() {
   loadDotEnv();
   const defaults = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'config', 'default.json'), 'utf8')
   );
+
+  const pf = process.env.ProgramFiles || 'C:\\Program Files';
+  const binaryNotes = [];
+  const resolveTool = (label, configured, candidates) => {
+    const r = findBinary(configured, candidates);
+    if (r.note) binaryNotes.push(`${label}: ${r.note}`);
+    return r.path;
+  };
 
   const cfg = {
     ...defaults,
@@ -52,13 +109,26 @@ function buildConfig() {
       port: envInt('YTSW_PORT', defaults.server.port),
     },
     paths: {
-      ytdlp: env('YTSW_YTDLP_PATH', defaults.paths.ytdlp),
-      ffmpeg: env('YTSW_FFMPEG_PATH', defaults.paths.ffmpeg),
-      mpv: env('YTSW_MPV_PATH', defaults.paths.mpv),
+      ytdlp: resolveTool(
+        'yt-dlp',
+        env('YTSW_YTDLP_PATH', defaults.paths.ytdlp),
+        windowsCandidates('yt-dlp.exe', ['C:\\Tools\\yt-dlp'])
+      ),
+      ffmpeg: resolveTool(
+        'ffmpeg',
+        env('YTSW_FFMPEG_PATH', defaults.paths.ffmpeg),
+        windowsCandidates('ffmpeg.exe', ['C:\\Tools\\ffmpeg\\bin', path.join(pf, 'ffmpeg', 'bin')])
+      ),
+      mpv: resolveTool(
+        'mpv',
+        env('YTSW_MPV_PATH', defaults.paths.mpv),
+        windowsCandidates('mpv.exe', ['C:\\Tools\\mpv', path.join(pf, 'mpv')])
+      ),
       python: env('YTSW_PYTHON_PATH', defaults.paths.python),
       dataDir: path.resolve(ROOT, defaults.paths.dataDir),
       logDir: path.resolve(ROOT, defaults.paths.logDir),
     },
+    binaryNotes,
     vcam: {
       ...defaults.vcam,
       enabled: envBool('YTSW_VCAM_ENABLED', defaults.vcam.enabled),

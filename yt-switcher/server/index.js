@@ -12,6 +12,8 @@ const { buildApp } = require('./app');
 
 async function main() {
   logger.info({ platform: process.platform, node: process.version }, 'yt-switcher starting');
+  logger.info({ ytdlp: config.paths.ytdlp, ffmpeg: config.paths.ffmpeg, mpv: config.paths.mpv }, 'resolved tool paths');
+  for (const note of config.binaryNotes) logger.warn(note);
 
   const store = new StateStore();
   const sources = new SourceManager(store);

@@ -38,12 +38,15 @@ module.exports = async function systemRoutes(app, { ctx }) {
       monitorStatus: ctx.monitor.status,
       ipcConnected: Boolean(ctx.monitor.sock),
       toneTest: null,
+      binaryNotes: config.binaryNotes,
       mpvLogTail: [],
     };
 
-    const ver = await run(config.paths.mpv, ['--version'], 5000);
+    const ver = await run(config.paths.mpv, ['--version'], 10000);
     result.mpvVersion = ver.err
-      ? `ERROR: ${ver.err.code === 'ENOENT' ? 'mpv not found — check YTSW_MPV_PATH' : ver.err.message}`
+      ? `ERROR: ${ver.err.code === 'ENOENT'
+          ? 'mpv not found — set YTSW_MPV_PATH in .env and RESTART the server'
+          : (ver.stderr.trim() || ver.err.message).slice(0, 200)}`
       : (ver.stdout.split('\n')[0] || '').trim();
 
     // ffplay lives next to ffmpeg in every standard distribution.
