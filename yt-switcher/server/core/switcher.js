@@ -91,6 +91,24 @@ class Switcher extends EventEmitter {
       if (pos != null && pos > 0) this.sources.savePosition(this.programId, pos);
     }, 5000);
 
+    // Two-way volume/mute sync: adjustments made directly in the mpv window
+    // (OSC) are adopted into persisted settings, so the next program switch
+    // or app restart re-applies what the operator actually chose — instead
+    // of stomping it with a stale stored value on every load.
+    this.monitor.on('props', (props) => {
+      const s = this.store.state.settings;
+      let changed = false;
+      if (typeof props.volume === 'number' && Math.abs(props.volume - s.volume) > 0.5) {
+        this.store.update((st) => (st.settings.volume = Math.round(props.volume)));
+        changed = true;
+      }
+      if (typeof props.mute === 'boolean' && props.mute !== s.muted) {
+        this.store.update((st) => (st.settings.muted = props.mute));
+        changed = true;
+      }
+      if (changed) this.emit('programChanged', this.snapshot());
+    });
+
     // Periodic URL freshness check
     this._refreshTimer = setInterval(() => this._checkUrlFreshness(), REFRESH_CHECK_MS);
   }
