@@ -95,6 +95,10 @@ class MpvController extends EventEmitter {
     // so "toggling the monitor off" means audio-only, not no-mpv.
     this.mode = config.monitor.mode === 'audio-only' ? 'audio-only' : 'video-audio';
 
+    // Runtime audio output device (null = mpv default). Re-applied on every
+    // IPC (re)connect so it survives mpv restarts.
+    this._audioDevice = null;
+
     // Last load() arguments — replayed after (re)connect so a program is
     // never lost to a race (startup restore before the IPC pipe is up,
     // or an mpv crash/restart mid-show).
@@ -252,6 +256,12 @@ class MpvController extends EventEmitter {
 
       // Set up property observers for reactive state changes
       this._initObservers();
+
+      // Re-apply the chosen audio output (e.g. VB-Cable for feeding a
+      // virtual microphone alongside the virtual camera).
+      if (this._audioDevice) {
+        this.command(['set_property', 'audio-device', this._audioDevice]);
+      }
 
       // Start periodic polling for timeline properties
       this._pollTimer = setInterval(() => this._poll(), POLL_MS);
@@ -607,11 +617,19 @@ class MpvController extends EventEmitter {
    * ================================================================ */
 
   /**
-   * Change the audio output device at runtime.
-   * @param {string} device - Audio device identifier
+   * Change the audio output device at runtime (mpv switches live).
+   * Remembered and re-applied across mpv restarts.
+   * @param {string} device - mpv device id (e.g. "wasapi/{...}" or "auto")
    */
   async setAudioDevice(device) {
-    return this.command(['set_property', 'audio-device', device]);
+    this._audioDevice = device && device !== 'auto' ? device : null;
+    return this.command(['set_property', 'audio-device', device || 'auto']);
+  }
+
+  /** List audio output devices mpv can use ([{name, description}]). */
+  async getAudioDevices() {
+    const r = await this.command(['get_property', 'audio-device-list']);
+    return r && r.error === 'success' && Array.isArray(r.data) ? r.data : [];
   }
 }
 

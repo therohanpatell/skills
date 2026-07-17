@@ -61,17 +61,26 @@ In OBS/vMix/Teams/Zoom/Discord/Meet, pick the video device named
 **OBS Virtual Camera**. It exists as soon as yt-switcher is running (showing
 black until a Program is selected) and stays alive across every switch.
 
-## Routing program audio into calls (optional)
+## Routing program audio into calls (virtual microphone)
 
 Virtual cameras carry no audio (a Windows platform constraint, true for every
-vendor). To feed program audio into Teams/Zoom:
+vendor — including OBS's own virtual camera). The industry solution is to pair
+the virtual camera with a virtual MICROPHONE:
 
-1. Install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) (free).
-2. Find the exact device name: `mpv --audio-device=help`
-3. Add to `config/default.json` under `monitor`:
-   `"audioDevice": "wasapi/{...CABLE Input id...}"` — or leave `auto` for
-   normal speakers.
-4. In Teams/Zoom pick **CABLE Output** as the microphone.
+1. Install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) (free), reboot.
+2. In the yt-switcher side panel → MONITOR → **Audio out**, pick
+   **CABLE Input (VB-Audio Virtual Cable)**. Program audio now flows into the
+   virtual cable instead of (or, see tip below, as well as) your speakers.
+   The choice persists across restarts.
+3. In Teams/Zoom/Meet pick **CABLE Output** as the *microphone* (disable the
+   app's noise suppression for clean program sound). In OBS add an
+   *Audio Input Capture* source using CABLE Output.
+4. Sync: video and audio are aligned by the A/V SYNC ◀ ▶ buttons — set once
+   per stream by ear; the lock-step 1× pacing keeps it stable.
+
+Tip — hearing it yourself while feeding the call: enable "Listen to this
+device" on CABLE Output (Windows Sound → Recording → CABLE Output →
+Properties → Listen), which mirrors the cable to your speakers.
 
 ## Uninstalling
 

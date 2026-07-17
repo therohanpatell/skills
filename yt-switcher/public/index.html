@@ -108,6 +108,12 @@
       <section class="side-block">
         <header class="panel-title">MONITOR (mpv)</header>
         <div class="kv"><span>Status</span><b id="monitorStatus" class="status-pill">—</b></div>
+        <div class="kv"><span>Audio out</span>
+          <select id="audioDeviceSelect" class="ctl ctl-select mini-select"
+                  title="Where program audio plays. Pick 'CABLE Input' (VB-Audio Cable) to feed a virtual microphone for Zoom/Teams/OBS alongside the virtual camera.">
+            <option value="auto">auto (default)</option>
+          </select>
+        </div>
         <button id="btnMonitorToggle" class="mini-btn">Toggle monitor window</button>
         <button id="btnAudioTest" class="mini-btn">&#128266; Test audio (beep)</button>
         <div id="audioTestResult" class="test-result"></div>

@@ -269,6 +269,25 @@ function renderSidePanel() {
       : 'Hide window (keep audio)';
   }
 
+  // Populate the audio-output selector once mpv is reachable.
+  if (state.monitor.status === 'running' && !renderSidePanel._audioDevicesLoaded) {
+    renderSidePanel._audioDevicesLoaded = true;
+    api.getAudioDevices().then(({ devices, selected }) => {
+      const sel = $('audioDeviceSelect');
+      if (!sel || !devices.length) return;
+      sel.innerHTML = '<option value="auto">auto (default)</option>';
+      for (const d of devices) {
+        if (!d.name || d.name === 'auto') continue;
+        const opt = document.createElement('option');
+        opt.value = d.name;
+        opt.textContent = d.description || d.name;
+        sel.appendChild(opt);
+      }
+      sel.value = selected || 'auto';
+      if (sel.selectedIndex < 0) sel.value = 'auto';
+    }).catch(() => { renderSidePanel._audioDevicesLoaded = false; });
+  }
+
   if (els.vcamDeviceSelect && v.availableDevices) {
     const activeDev = v.device || 'OBS-Camera';
     const currentOpts = Array.from(els.vcamDeviceSelect.options).map((o) => o.value);
@@ -519,6 +538,9 @@ $('btnFullscreen').addEventListener('click', () => {
   else screen.requestFullscreen().catch(() => {});
 });
 $('btnMonitorToggle').addEventListener('click', () => api.toggleMonitor().catch(showError));
+$('audioDeviceSelect').addEventListener('change', () => {
+  api.setAudioDevice($('audioDeviceSelect').value).catch(showError);
+});
 $('btnVcamReset').addEventListener('click', () => api.resetVcam().catch(showError));
 
 $('btnAudioTest').addEventListener('click', async () => {

@@ -40,4 +40,5 @@ export const api = {
 
   // Diagnostics
   audioTest: () => request('POST', '/api/system/audio-test'),
+  getAudioDevices: () => request('GET', '/api/audio-devices'),
 };

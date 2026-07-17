@@ -18,6 +18,7 @@ const DEFAULT_STATE = {
     speed: 1,
     monitorEnabled: null, // null = follow config default
     monitorMode: null,    // null = follow config; 'video-audio' | 'audio-only'
+    audioDevice: null,    // null = system default; e.g. wasapi id of VB-Cable
     vcamDevice: null,     // null = follow default plugin device
   },
 };

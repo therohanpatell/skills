@@ -66,6 +66,9 @@ async function main() {
     s.monitorMode ||
     (s.monitorEnabled === false ? 'audio-only' : config.monitor.mode) ||
     'video-audio';
+  // Restore the chosen audio output (e.g. VB-Cable virtual microphone);
+  // applied automatically once the IPC pipe connects.
+  if (s.audioDevice) monitor.setAudioDevice(s.audioDevice);
   if (config.monitor.enabled) monitor.start();
 
   const app = await buildApp(ctx);

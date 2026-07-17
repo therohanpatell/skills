@@ -143,6 +143,7 @@ module.exports = async function playbackRoutes(app, { ctx }) {
           throw new ValidationError('audio-device requires a device identifier string');
         }
         await monitor.setAudioDevice(value);
+        store.update((st) => (st.settings.audioDevice = value === 'auto' ? null : value));
         break;
 
       // ---- VCam device ----
@@ -175,6 +176,13 @@ module.exports = async function playbackRoutes(app, { ctx }) {
     store.update((st) => (st.settings.monitorEnabled = true));
     return { ok: true, mode: monitor.mode };
   });
+
+  // ---- Audio output devices (for the side-panel selector) ----
+
+  app.get('/api/audio-devices', async () => ({
+    devices: await monitor.getAudioDevices(),
+    selected: store.state.settings.audioDevice || 'auto',
+  }));
 
   // ---- VCam bridge reset ----
 
