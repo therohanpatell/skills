@@ -58,8 +58,34 @@ schtasks /Create /TN "YT Switcher" /SC ONLOGON /TR "cmd /c cd /d C:\path\to\yt-s
 ## Selecting the camera in other apps
 
 In OBS/vMix/Teams/Zoom/Discord/Meet, pick the video device named
-**OBS Virtual Camera**. It exists as soon as yt-switcher is running (showing
-black until a Program is selected) and stays alive across every switch.
+**YT Switcher Virtual Cam** (or **OBS Virtual Camera** if you use that
+backend). It exists as soon as yt-switcher is running (showing black until a
+Program is selected) and stays alive across every switch.
+
+## Branded devices: "YT Switcher Virtual Cam" + "YT Switcher Audio"
+
+**Camera** — powered by [akvirtualcamera](https://github.com/webcamoid/akvirtualcamera)
+(MIT), a standalone DirectShow virtual camera with a name we choose — no OBS
+involved. `setup-windows.ps1` installs it and creates the device (run the
+script as Administrator for this step); manually it is:
+
+```powershell
+AkVCamManager add-device "YT Switcher Virtual Cam"   # prints the device id
+AkVCamManager add-format <id> NV12 1920 1080 60
+AkVCamManager update
+```
+
+Once it exists, the app auto-selects it (the Device dropdown always lets you
+switch back to OBS Virtual Camera or any other virtual camera). It appears in
+vMix, OBS, Zoom, Teams, and Google Meet like any webcam.
+
+**Audio** — virtual *audio* devices require a signed kernel driver, which is
+why nobody rolls their own; instead, install VB-Audio Cable once and rename
+its endpoints so every app shows **YT Switcher Audio**:
+`mmsys.cpl` → Playback → "CABLE Input" → Properties → rename to
+`YT Switcher Audio`, and Recording → "CABLE Output" → the same. Then pick it
+in the side panel's **Audio out** dropdown, and select it as the microphone
+in your calling/production app.
 
 ## Routing program audio into calls (virtual microphone)
 

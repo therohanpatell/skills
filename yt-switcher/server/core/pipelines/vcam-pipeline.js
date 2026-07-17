@@ -104,6 +104,29 @@ function detectVirtualCameras() {
   return Array.from(devices);
 }
 
+/**
+ * Discover akvirtualcamera devices (Map of description -> device id).
+ * These power the branded "YT Switcher Virtual Cam": a DirectShow camera
+ * with OUR name, fed directly over AkVCamManager's stdin stream — no OBS
+ * involved. Missing/broken manager simply yields an empty map and the
+ * pyvirtualcam/OBS path is used instead.
+ */
+function detectAkvcamDevices() {
+  const map = new Map();
+  const opts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 10000 };
+  try {
+    const ids = execSync(`"${config.paths.akvcam}" devices`, opts)
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    for (const id of ids) {
+      try {
+        const desc = execSync(`"${config.paths.akvcam}" description ${id}`, opts).trim();
+        if (desc) map.set(desc, id);
+      } catch (_) { /* skip unreadable device */ }
+    }
+  } catch (_) { /* manager not installed — fine */ }
+  return map;
+}
+
 class VcamPipeline extends EventEmitter {
   constructor(store = null) {
     super();
@@ -111,23 +134,28 @@ class VcamPipeline extends EventEmitter {
     const { width, height, fps, device: configDevice } = config.vcam;
     this.frameSize = nv12Size(width, height);
 
-    this.availableDevices = detectVirtualCameras();
+    // Branded akvcam devices (description -> id), merged into the list.
+    this.akvcamDevices = detectAkvcamDevices();
+    this.availableDevices = Array.from(
+      new Set([...this.akvcamDevices.keys(), ...detectVirtualCameras()])
+    );
 
     // Determine active virtual camera device
     const savedDevice = store && store.state && store.state.settings ? store.state.settings.vcamDevice : null;
     let selectedDevice = savedDevice || configDevice;
 
-    // Prefer Unity Video Capture or any non-OBS virtual camera if available, to leave OBS Virtual Camera free
+    // Default preference: our own branded camera, then OBS, then anything else.
+    const pickDefault = () =>
+      this.availableDevices.find((d) => /yt\s*switcher/i.test(d)) ||
+      this.availableDevices.find((d) => d === 'OBS Virtual Camera') ||
+      this.availableDevices[0] ||
+      'OBS Virtual Camera';
+
     if (!savedDevice) {
-      const standalone = this.availableDevices.find((d) => d === 'Unity Video Capture') ||
-                         this.availableDevices.find((d) => d !== 'OBS Virtual Camera');
-      selectedDevice = standalone || 'OBS Virtual Camera';
-    } else if (OBS_INTERNAL_DEVICES.has(selectedDevice)) {
-      logger.warn({ device: selectedDevice }, 'configured vcam device is an OBS-internal read-only device, falling back to standalone/OBS virtual camera');
-      const fallback = this.availableDevices.find((d) => d === 'Unity Video Capture') ||
-                       this.availableDevices.find((d) => d !== 'OBS Virtual Camera') ||
-                       'OBS Virtual Camera';
-      selectedDevice = fallback;
+      selectedDevice = pickDefault();
+    } else if (OBS_INTERNAL_DEVICES.has(selectedDevice) || !this.availableDevices.includes(selectedDevice)) {
+      logger.warn({ device: selectedDevice }, 'saved vcam device unusable, picking default');
+      selectedDevice = pickDefault();
     }
     this.currentDevice = selectedDevice;
 
@@ -172,7 +200,13 @@ class VcamPipeline extends EventEmitter {
     this._seekBase = 0;   // -ss offset of the current decode
     this._posSpeed = 1;   // setpts factor: source-seconds per output-second
 
-    // ---- Virtual camera bridge (persistent, supervised) ----
+    // ---- Cached black frame (must exist before the sink starts) ----
+    this._blackFrame = blackFrame(width, height);
+
+    // ---- Virtual camera sink (persistent, supervised) ----
+    this._sinkType = null;   // 'akvcam' | 'pyvcam'
+    this._akvTimer = null;   // Node-side pacer for the akvcam sink
+    this._akvLastFrame = this._blackFrame;
     this._initBridge();
 
     // ---- MJPEG preview server ----
@@ -181,30 +215,60 @@ class VcamPipeline extends EventEmitter {
     this._previewBuf = Buffer.alloc(0);
     /** @type {Set<import('http').ServerResponse>} */
     this._previewClients = new Set();
-
-    // ---- Cached black frame ----
-    this._blackFrame = blackFrame(width, height);
   }
 
+  /**
+   * (Re)create the virtual camera sink for the current device.
+   * Two backends behind the same `this.bridge` ManagedProcess:
+   *  - akvcam:  `AkVCamManager stream` feeding OUR branded DirectShow camera
+   *             ("YT Switcher Virtual Cam"). Pacing/hold-last-frame is done
+   *             here in Node (timer at the target fps).
+   *  - pyvcam:  the Python pyvirtualcam bridge for OBS/other cameras, which
+   *             paces and holds frames itself.
+   */
   _initBridge() {
+    clearInterval(this._akvTimer);
+    this._akvTimer = null;
+
     if (!config.vcam.enabled) {
       this.bridge = null;
+      this._sinkType = null;
       return;
     }
     const { width, height, fps } = config.vcam;
     const targetDev = this.currentDevice;
+    const akvId = this.akvcamDevices.get(targetDev);
+    this._sinkType = akvId ? 'akvcam' : 'pyvcam';
 
-    this.bridge = new ManagedProcess('vcam-bridge', () => ({
-      cmd: config.paths.python,
-      args: [
-        path.join(config.root, 'bridge', 'vcam_bridge.py'),
-        '--width', String(width),
-        '--height', String(height),
-        '--fps', String(fps),
-        '--device', targetDev,
-      ],
-      opts: { stdio: ['pipe', 'pipe', 'pipe'] },
-    }));
+    if (akvId) {
+      this._akvLastFrame = this._blackFrame;
+      this.bridge = new ManagedProcess('vcam-sink', () => ({
+        cmd: config.paths.akvcam,
+        args: ['stream', akvId, 'NV12', String(width), String(height)],
+        opts: { stdio: ['pipe', 'pipe', 'pipe'] },
+      }));
+      // Hold-last-frame pacer: keeps the camera alive and smooth across
+      // program switches, exactly like the Python bridge does internally.
+      this._akvTimer = setInterval(() => {
+        const b = this.bridge && this.bridge.proc;
+        if (!b || !b.stdin || !b.stdin.writable) return;
+        // Consumer behind? Skip a tick instead of queueing unboundedly.
+        if (b.stdin.writableLength > this.frameSize * 3) return;
+        b.stdin.write(this._akvLastFrame);
+      }, Math.max(5, Math.round(1000 / fps)));
+    } else {
+      this.bridge = new ManagedProcess('vcam-sink', () => ({
+        cmd: config.paths.python,
+        args: [
+          path.join(config.root, 'bridge', 'vcam_bridge.py'),
+          '--width', String(width),
+          '--height', String(height),
+          '--fps', String(fps),
+          '--device', targetDev,
+        ],
+        opts: { stdio: ['pipe', 'pipe', 'pipe'] },
+      }));
+    }
 
     this.bridge.on('started', () => {
       this.notification = null;
@@ -638,7 +702,7 @@ class VcamPipeline extends EventEmitter {
     }
   }
 
-  /** Write a complete frame to the bridge stdin with backpressure. */
+  /** Write a complete frame to the active sink with backpressure. */
   _writeToBridge(frame, sourceProc) {
     const b = this.bridge && this.bridge.proc;
     if (!b || !b.stdin || !b.stdin.writable) return;
@@ -650,6 +714,13 @@ class VcamPipeline extends EventEmitter {
     // may still be sitting in the pipe's write queue. Sending an aliased
     // buffer is what produced the intermittent green/corrupted camera frames.
     const payload = Buffer.from(frame);
+
+    // akvcam sink: the pacer timer sends frames at the target fps; here we
+    // only update the latest frame it should be sending.
+    if (this._sinkType === 'akvcam') {
+      this._akvLastFrame = payload;
+      return;
+    }
 
     if (!b.stdin.write(payload) && sourceProc && sourceProc.stdout) {
       // Backpressure: pause FFmpeg output until the bridge drains
@@ -752,6 +823,7 @@ class VcamPipeline extends EventEmitter {
 
   async shutdown() {
     clearInterval(this._perfInterval);
+    clearInterval(this._akvTimer);
     this.stopFfmpeg({ blank: true });
     if (this.bridge) this.bridge.stop();
     if (this._previewServer) this._previewServer.close();

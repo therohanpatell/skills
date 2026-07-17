@@ -124,6 +124,15 @@ function buildConfig() {
         env('YTSW_MPV_PATH', defaults.paths.mpv),
         windowsCandidates('mpv.exe', ['C:\\Tools\\mpv', path.join(pf, 'mpv')])
       ),
+      // Optional: akvirtualcamera manager — powers the branded
+      // "YT Switcher Virtual Cam" device. Missing = OBS vcam fallback.
+      akvcam:
+        process.platform === 'win32'
+          ? findBinary(env('YTSW_AKVCAM_PATH', 'AkVCamManager'), [
+              path.join(pf, 'AkVirtualCamera', 'x64', 'AkVCamManager.exe'),
+              'C:\\Tools\\AkVirtualCamera\\x64\\AkVCamManager.exe',
+            ]).path
+          : env('YTSW_AKVCAM_PATH', 'AkVCamManager'),
       python: env('YTSW_PYTHON_PATH', defaults.paths.python),
       dataDir: path.resolve(ROOT, defaults.paths.dataDir),
       logDir: path.resolve(ROOT, defaults.paths.logDir),

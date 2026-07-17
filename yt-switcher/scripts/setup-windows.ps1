@@ -74,6 +74,69 @@ the device), stop it, and close OBS. OBS never needs to run again.
 "@
 }
 
+# 5b. Branded virtual camera: "YT Switcher Virtual Cam" (akvirtualcamera).
+#     Independent of OBS; works in vMix/OBS/Zoom/Teams/Google Meet.
+$akMgr = @(
+    "$env:ProgramFiles\AkVirtualCamera\x64\AkVCamManager.exe",
+    "C:\Tools\AkVirtualCamera\x64\AkVCamManager.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $akMgr) {
+    Write-Host "[..] akvirtualcamera not found - downloading latest release" -ForegroundColor Yellow
+    try {
+        $rel = Invoke-RestMethod 'https://api.github.com/repos/webcamoid/akvirtualcamera/releases/latest'
+        $asset = $rel.assets | Where-Object { $_.name -match 'windows.*\.exe$' } | Select-Object -First 1
+        if ($asset) {
+            $dl = Join-Path $env:TEMP $asset.name
+            Invoke-WebRequest $asset.browser_download_url -OutFile $dl
+            Write-Host "[..] Running akvirtualcamera installer (accept the prompts)"
+            Start-Process $dl -Wait
+            $akMgr = "$env:ProgramFiles\AkVirtualCamera\x64\AkVCamManager.exe"
+        }
+    } catch {
+        Write-Warning "Could not download akvirtualcamera automatically: $_"
+        Write-Warning "Install manually from https://github.com/webcamoid/akvirtualcamera/releases - the app falls back to the OBS Virtual Camera meanwhile."
+    }
+}
+
+if ($akMgr -and (Test-Path $akMgr)) {
+    $existing = (& $akMgr devices) 2>$null | ForEach-Object {
+        $id = $_.Trim()
+        if ($id) { (& $akMgr description $id) 2>$null }
+    }
+    if ($existing -contains 'YT Switcher Virtual Cam') {
+        Write-Host "[ok] 'YT Switcher Virtual Cam' already exists" -ForegroundColor Green
+    } else {
+        Write-Host "[..] Creating 'YT Switcher Virtual Cam' (may require Administrator)"
+        try {
+            $newId = (& $akMgr add-device 'YT Switcher Virtual Cam' | Select-Object -Last 1).Trim()
+            if (-not $newId) { throw 'add-device returned no device id' }
+            & $akMgr add-format $newId NV12 1920 1080 60 | Out-Null
+            & $akMgr add-format $newId NV12 1280 720 30  | Out-Null
+            & $akMgr add-format $newId RGB24 1280 720 30 | Out-Null
+            & $akMgr update | Out-Null
+            Write-Host "[ok] 'YT Switcher Virtual Cam' created ($newId)" -ForegroundColor Green
+        } catch {
+            Write-Warning "Could not create the branded camera: $_"
+            Write-Warning "Re-run this script from an ADMINISTRATOR PowerShell to create it."
+        }
+    }
+}
+
+# 5c. Branded audio: virtual audio devices need a signed kernel driver, so we
+#     use VB-Audio Cable and RENAME its endpoint to 'YT Switcher Audio'.
+Write-Host ""
+Write-Host "=== Branded audio device ('YT Switcher Audio') ==="
+Write-Host @"
+ 1. Install VB-Audio Cable (free): https://vb-audio.com/Cable/  then reboot.
+ 2. Rename its endpoints (10 seconds, one time):
+      Windows search 'mmsys.cpl' -> Playback tab -> 'CABLE Input'
+        -> Properties -> rename the text box at the top to: YT Switcher Audio
+      Recording tab -> 'CABLE Output' -> Properties -> rename to: YT Switcher Audio
+ 3. In the app side panel -> MONITOR -> Audio out -> pick 'YT Switcher Audio'.
+ 4. In Zoom/Teams/Meet/vMix pick microphone 'YT Switcher Audio'.
+"@
+
 # 6. Sanity check the bridge can open the camera (2-second probe).
 Write-Host "[..] Probing virtual camera access"
 $probe = @'
