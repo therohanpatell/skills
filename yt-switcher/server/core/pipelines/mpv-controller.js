@@ -435,10 +435,18 @@ class MpvController extends EventEmitter {
       await this.command(['set_property', 'cache', 'yes']);
       await this.command(['set_property', 'demuxer-readahead-secs', 10]);
       await this.command(['set_property', 'cache-secs', 15]);
+      // Join the HLS stream 3 segments behind the live edge — the SAME
+      // offset the FFmpeg vcam pipeline uses — so monitor audio and camera
+      // video start closely aligned instead of ~10s apart.
+      const lo = await this.command(['set_property', 'demuxer-lavf-o', { live_start_index: '-3' }]);
+      if (lo && lo.error !== 'success') {
+        logger.warn({ error: lo.error }, 'could not set live_start_index for mpv');
+      }
     } else {
       await this.command(['set_property', 'cache', 'yes']);
       await this.command(['set_property', 'demuxer-readahead-secs', 5]);
       await this.command(['set_property', 'cache-secs', 30]);
+      await this.command(['set_property', 'demuxer-lavf-o', {}]);
     }
 
     // ---- Set options that contain arbitrary text via set_property ----
@@ -538,6 +546,20 @@ class MpvController extends EventEmitter {
   async seek(seconds) {
     if (!this._hasMedia || this._isLive) return null;
     return this.command(['seek', seconds, 'relative']);
+  }
+
+  /**
+   * A/V sync nudge: shift the monitor's playback point (audio + monitor
+   * video together) relative to the virtual camera. Unlike seek(), this is
+   * allowed on live streams — mpv seeks within its cache/HLS window.
+   * Positive = toward the live edge = audio plays EARLIER vs the camera.
+   */
+  async nudge(seconds) {
+    if (!this._hasMedia) return null;
+    const s = Math.max(-10, Math.min(10, Number(seconds) || 0));
+    // exact: keyframe-snapped seeking would overshoot a 0.5s nudge by whole
+    // seconds, making fine A/V alignment impossible.
+    return this.command(['seek', s, 'relative+exact']);
   }
 
   /**

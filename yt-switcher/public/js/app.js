@@ -237,6 +237,10 @@ function renderProgram() {
   const showDvr = active && source && !source.isLive;
   els.dvrControls.classList.toggle('hidden', !showDvr);
 
+  // Sync-nudge controls only make sense while a live program is on air.
+  const syncEl = $('syncControls');
+  if (syncEl) syncEl.classList.toggle('hidden', !(active && source && source.isLive));
+
   // Live streams are pinned to 1× — lock the speed selector.
   const liveProgram = Boolean(source && source.isLive);
   els.speedSelect.disabled = liveProgram;
@@ -540,6 +544,13 @@ $('btnAudioTest').addEventListener('click', async () => {
 if (els.vcamDeviceSelect) {
   els.vcamDeviceSelect.addEventListener('change', () => {
     api.setVcamDevice(els.vcamDeviceSelect.value).catch(showError);
+  });
+}
+
+// --- A/V sync nudge (live) ---
+for (const btn of document.querySelectorAll('.sync-btn')) {
+  btn.addEventListener('click', () => {
+    api.playback('sync-nudge', Number(btn.dataset.nudge)).catch(showError);
   });
 }
 

@@ -410,6 +410,11 @@ class VcamPipeline extends EventEmitter {
         '-probesize', '1000000',
         '-analyzeduration', '1000000',
         '-rw_timeout', '10000000', // 10s network timeout
+        // Pace the live decode at exactly 1× real time. HLS delivers whole
+        // segments in bursts; unpaced, each burst overflowed the bridge's
+        // jitter queue (video skipped ahead) and then starved it (freeze) —
+        // jerky video running ahead of mpv's smooth, buffered audio.
+        '-readrate', '1',
       );
       if (/m3u8/i.test(videoUrl)) {
         args.push('-live_start_index', '-3');

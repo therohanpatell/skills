@@ -55,6 +55,16 @@
           <button id="btnFullscreen" class="ctl" title="Fullscreen preview">&#x26F6;</button>
         </div>
 
+        <!-- A/V sync nudge (live only): align monitor audio with camera video -->
+        <div class="dvr-controls hidden" id="syncControls">
+          <span class="dvr-time" title="If the camera video runs AHEAD of the sound, press ▶ (audio earlier). If sound comes first, press ◀.">A/V SYNC</span>
+          <button class="ctl dvr-btn sync-btn" data-nudge="-2"   title="Audio 2s later">◀◀</button>
+          <button class="ctl dvr-btn sync-btn" data-nudge="-0.5" title="Audio 0.5s later">◀</button>
+          <button class="ctl dvr-btn sync-btn" data-nudge="0.5"  title="Audio 0.5s earlier">▶</button>
+          <button class="ctl dvr-btn sync-btn" data-nudge="2"    title="Audio 2s earlier">▶▶</button>
+          <span class="dvr-remaining dim" id="syncHint">video ahead of sound? press ▶</span>
+        </div>
+
         <!-- DVR Controls (VOD only) -->
         <div class="dvr-controls" id="dvrControls">
           <button id="btnSeekBack" class="ctl dvr-btn" title="Seek -10s (Left arrow)">⏪</button>

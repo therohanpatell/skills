@@ -30,6 +30,7 @@ module.exports = async function playbackRoutes(app, { ctx }) {
               'mute', 'unmute', 'volume', 'speed',
               'fullscreen',
               'seek-forward', 'seek-backward', 'seek-to', 'seek-percent',
+              'sync-nudge',
               'audio-device', 'vcam-device',
             ],
           },
@@ -121,6 +122,17 @@ module.exports = async function playbackRoutes(app, { ctx }) {
           throw new ValidationError('seek-percent requires a value between 0 and 100');
         }
         await switcher.seekPercent(pct);
+        break;
+      }
+
+      // ---- A/V sync nudge (live): shift monitor audio vs camera video ----
+
+      case 'sync-nudge': {
+        const secs = Number(value);
+        if (!Number.isFinite(secs)) {
+          throw new ValidationError('sync-nudge requires a numeric value (seconds)');
+        }
+        await monitor.nudge(secs);
         break;
       }
 
