@@ -1,0 +1,18 @@
+services:
+  pdfocr:
+    build: .
+    ports:
+      - "8000:8000"          # reachable at http://<your-lan-ip>:8000
+    environment:
+      # host.docker.internal points at an Ollama/vLLM server running on the host machine
+      PDFOCR_VLM_BASE_URL: http://host.docker.internal:11434/v1
+      PDFOCR_VLM_MODEL: qwen2.5vl:7b
+      PDFOCR_ENGINE: auto
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - pdfocr-data:/data
+    restart: unless-stopped
+
+volumes:
+  pdfocr-data:

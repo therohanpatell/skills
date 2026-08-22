@@ -1,0 +1,101 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #14171f;
+  --muted: #626a7a;
+  --line: #dfe3ea;
+  --accent: #2f6df6;
+  --ok: #1f9d55;
+  --bad: #d3453f;
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101319;
+    --panel: #171b23;
+    --ink: #e9edf5;
+    --muted: #98a1b3;
+    --line: #262c38;
+    --accent: #6b9bff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1rem 4rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header, main, footer { max-width: 880px; margin: 0 auto; }
+
+h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
+h2 { margin: 0 0 .35rem; font-size: 1.05rem; }
+.sub, .meta { color: var(--muted); margin: .2rem 0 0; font-size: .875rem; }
+
+.engines { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0 1.4rem; }
+.pill {
+  border: 1px solid var(--line); border-radius: 999px; padding: .15rem .6rem;
+  font-size: .78rem; color: var(--muted); background: var(--panel);
+}
+.pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+.pill.off { color: var(--muted); opacity: .75; }
+
+section {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.25rem;
+}
+
+.drop { text-align: center; border-style: dashed; transition: border-color .15s, background .15s; }
+.drop.hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.drop-title { font-size: 1.05rem; font-weight: 600; margin: .4rem 0 .2rem; }
+.drop-hint { color: var(--muted); margin: 0 0 1rem; }
+
+.options { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+.options label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; color: var(--muted); text-align: left; }
+select {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: .35rem .5rem; font: inherit; font-size: .85rem;
+}
+
+button, .button {
+  font: inherit; font-size: .875rem; cursor: pointer; text-decoration: none;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  border-radius: 8px; padding: .4rem .8rem; display: inline-block;
+}
+button:hover, .button:hover { border-color: var(--accent); }
+button.link { border: 0; background: none; color: var(--accent); padding: 0; }
+button.danger { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); color: var(--bad); }
+button.ghost { color: var(--muted); }
+
+.job-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+
+.bar { height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; margin: 1rem 0 .5rem; border: 1px solid var(--line); }
+.bar-fill { height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
+
+.pages { display: flex; flex-wrap: wrap; gap: 3px; margin: .8rem 0; }
+.page { width: 14px; height: 14px; border-radius: 3px; background: var(--bg); border: 1px solid var(--line); }
+.page.running { background: color-mix(in srgb, var(--accent) 45%, var(--panel)); border-color: var(--accent); }
+.page.done { background: var(--ok); border-color: var(--ok); }
+.page.failed { background: var(--bad); border-color: var(--bad); }
+
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+
+.output {
+  margin-top: 1rem; max-height: 420px; overflow: auto; white-space: pre-wrap;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: .9rem; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.recent ul { list-style: none; margin: 0; padding: 0; }
+.recent li { display: flex; justify-content: space-between; gap: 1rem; padding: .4rem 0; border-bottom: 1px solid var(--line); font-size: .875rem; }
+.recent li:last-child { border-bottom: 0; }
+.recent a { color: var(--accent); text-decoration: none; }
+
+code { font-size: .82em; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: .05rem .3rem; }
+footer a { color: var(--accent); }
+.hidden { display: none; }

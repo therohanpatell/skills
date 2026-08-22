@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdfocr"
+version = "0.1.0"
+description = "Local PDF -> text OCR service backed by vision LLMs (Qwen-VL, DeepSeek-OCR, ...)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "httpx>=0.27",
+    "PyMuPDF>=1.24",
+    "Pillow>=10.2",
+]
+
+[project.scripts]
+pdfocr = "pdfocr.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pdfocr*"]
+
+[tool.setuptools.package-data]
+pdfocr = ["static/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI dependency defaults are function calls by design.
+"pdfocr/api.py" = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

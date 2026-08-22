@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pdfocr &middot; PDF to text</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128441;</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>pdfocr</h1>
+    <p class="sub">PDF in, text out &mdash; on your own network.</p>
+    <div id="engines" class="engines"></div>
+  </header>
+
+  <main>
+    <section id="drop" class="drop">
+      <input type="file" id="file" accept="application/pdf" hidden />
+      <p class="drop-title">Drop a PDF here</p>
+      <p class="drop-hint">or <button type="button" id="browse" class="link">choose a file</button></p>
+      <div class="options">
+        <label>Engine
+          <select id="engine">
+            <option value="auto">auto (text layer &rarr; vision model &rarr; tesseract)</option>
+            <option value="vlm">vision model</option>
+            <option value="native">text layer only</option>
+            <option value="tesseract">tesseract</option>
+          </select>
+        </label>
+        <label>Render DPI
+          <select id="dpi">
+            <option value="150">150 &mdash; fast</option>
+            <option value="200" selected>200 &mdash; balanced</option>
+            <option value="300">300 &mdash; dense scans</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section id="job" class="job hidden">
+      <div class="job-head">
+        <div>
+          <h2 id="job-name">document.pdf</h2>
+          <p id="job-meta" class="meta">queued</p>
+        </div>
+        <button type="button" id="cancel" class="danger">Cancel</button>
+      </div>
+
+      <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+      <p id="job-status" class="meta"></p>
+      <div id="pages" class="pages"></div>
+
+      <div class="actions hidden" id="actions">
+        <button type="button" id="copy">Copy text</button>
+        <a id="dl-txt" class="button" download>Download .txt</a>
+        <a id="dl-md" class="button" download>Download .md</a>
+        <a id="dl-json" class="button" download>Download .json</a>
+        <button type="button" id="again" class="ghost">New file</button>
+      </div>
+
+      <pre id="output" class="output hidden"></pre>
+    </section>
+
+    <section class="recent">
+      <h2>Recent jobs</h2>
+      <ul id="recent-list"><li class="meta">none yet</li></ul>
+    </section>
+  </main>
+
+  <footer>
+    <p class="meta">
+      API: <code>POST /api/jobs</code> &middot; <code>GET /api/jobs/{id}/events</code> &middot;
+      <code>GET /api/jobs/{id}/result</code> &middot; <a href="/docs">OpenAPI docs</a>
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
