@@ -92,6 +92,19 @@ def analyse_static(config: DTFConfig, ddl: DDLSet) -> AnalysisResult:
     counter = 0
 
     known_tables = [t.name for t in ddl.tables]
+
+    # A config read straight from a *.json.template still carries placeholders,
+    # which look like table names but resolve to nothing. Say so plainly.
+    placeholders = [
+        name for name in config.source_tables
+        if any(marker in name for marker in ("{{", "${", "<%", "}}"))
+    ]
+    if placeholders:
+        warnings.append(
+            "Unresolved template placeholder(s) in the DTF source tables: "
+            + ", ".join(f"`{p}`" for p in placeholders)
+            + ". Fill the template in (or point at a rendered config) before generating."
+        )
     default_table = None
     for name in config.source_tables:
         table = ddl.get(name)

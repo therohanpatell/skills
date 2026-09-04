@@ -11,7 +11,12 @@ import yaml
 
 DATA_SUFFIXES = {".json", ".yaml", ".yml"}
 DOC_SUFFIXES = {".md", ".markdown"}
-SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", "output", ".dtf_cache"}
+# Config files are often shipped as templates: `feature.json.template`.
+TEMPLATE_SUFFIXES = {".template", ".tmpl", ".j2", ".jinja"}
+SKIP_DIRS = {
+    ".git", ".github", "__pycache__", ".venv", "venv", "node_modules",
+    "output", ".dtf_cache", ".idea", "target",
+}
 
 DDL_HINTS = ("ddl", "schema", "schemas", "tables", "table")
 DTF_HINTS = ("dtf", "transform", "transformation", "pipeline", "mapping", "job")
@@ -38,12 +43,22 @@ def read_any(path: str | Path) -> Any:
     return parse_text(text, p.name)
 
 
+def effective_suffix(path: Path) -> str:
+    """The suffix that decides the format, seeing through a template wrapper.
+
+    `npw_details.json.template` is a JSON file; its literal suffix is not.
+    """
+    if path.suffix.lower() in TEMPLATE_SUFFIXES:
+        return Path(path.stem).suffix.lower()
+    return path.suffix.lower()
+
+
 def _one_line(exc: Exception) -> str:
     return " ".join(str(exc).split())[:200]
 
 
 def parse_text(text: str, filename: str = "<uploaded>") -> Any:
-    suffix = Path(filename).suffix.lower()
+    suffix = effective_suffix(Path(filename))
     try:
         if suffix in {".yaml", ".yml"}:
             return yaml.safe_load(text)
@@ -118,9 +133,8 @@ def discover_project(root: str | Path) -> ProjectFiles:
             continue
         if any(part in SKIP_DIRS for part in path.parts):
             continue
-        suffix = path.suffix.lower()
+        suffix = effective_suffix(path)
         rel_parts = {p.lower() for p in path.relative_to(root_path).parts[:-1]}
-        stem = path.stem.lower()
 
         if suffix in DOC_SUFFIXES:
             # Every markdown file is a candidate skill; the UI decides which to send.
