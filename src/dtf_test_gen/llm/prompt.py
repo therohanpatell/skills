@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from dtf_test_gen.loaders.skills import Skill
+from dtf_test_gen.loaders.skills import Skill, dtf_signals
 from dtf_test_gen.models.analysis import AnalysisResult, ColumnRole
 from dtf_test_gen.models.dtf import DTFConfig
 from dtf_test_gen.models.schema import DDLSet
@@ -108,7 +108,12 @@ def build_prompt(
 
     selected_skills = [s for s in skills if s.selected][:MAX_SKILLS]
     if selected_skills:
-        payload["skills"] = {s.name: s.excerpt() for s in selected_skills}
+        # Send the part of each document that matches what this DTF actually
+        # does, rather than whatever happens to sit at the top of the file.
+        wanted = set(dtf_signals(config))
+        payload["skills"] = {
+            s.name: s.relevant_excerpt(wanted) for s in selected_skills
+        }
 
     instruction = (
         "Analyse this transformation and return the JSON object described in your "

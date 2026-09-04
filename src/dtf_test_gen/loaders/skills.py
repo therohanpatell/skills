@@ -21,7 +21,9 @@ _TOPICS: dict[str, tuple[tuple[str, ...], str]] = {
     "window": (("window", "partition", "analytic", "rank"), "window functions"),
     "null": (("null", "default", "coalesce", "missing"), "NULL/default handling"),
     "dedup": (("dedup", "duplicate", "distinct", "unique"), "deduplication"),
-    "scd": (("scd", "history", "slowly"), "SCD history"),
+    # "scd2" is listed as well: a word-boundary search for "scd" does not match
+    # "SCD2", which is how most projects actually write it.
+    "scd": (("scd", "scd2", "history", "slowly"), "SCD history"),
     "mapping": (("mapping", "map", "rename", "passthrough"), "column mapping"),
 }
 
@@ -36,6 +38,46 @@ class Skill:
     topics: list[str] = field(default_factory=list)
     selected: bool = False
     reason: str = ""
+
+    def relevant_excerpt(self, topics: set[str], limit: int = MAX_EXCERPT_CHARS) -> str:
+        """Return the sections of this document that match the DTF's features.
+
+        Reference-style skills ("operations catalog", "parameter reference") are
+        organised by document structure, not by transformation topic. Taking the
+        first N characters of one sends its table of contents. Instead, split on
+        headings and keep the sections that actually discuss what this DTF does.
+        """
+        sections = _split_sections(self.text)
+        if len(sections) <= 1:
+            return self.excerpt(limit)
+
+        wanted: list[str] = []
+        for topic in topics:
+            wanted.extend(_TOPICS.get(topic, ((), ""))[0])
+        if not wanted:
+            return self.excerpt(limit)
+
+        scored: list[tuple[int, int, str]] = []
+        for index, (heading, body) in enumerate(sections):
+            score = _score_section(heading, body, wanted)
+            if score:
+                scored.append((score, index, _condense(heading, body)))
+        if not scored:
+            return self.excerpt(limit)
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        chosen: list[tuple[int, str]] = []
+        used = 0
+        for _score, index, text in scored:
+            if used + len(text) + 1 > limit:
+                continue
+            chosen.append((index, text))
+            used += len(text) + 1
+        if not chosen:
+            best = scored[0][2]
+            return best[:limit].rsplit("\n", 1)[0] + "\n..."
+        chosen.sort()
+        return "\n".join(text for _index, text in chosen)
 
     def excerpt(self, limit: int = MAX_EXCERPT_CHARS) -> str:
         """A compact excerpt: the rule-bearing lines, not the whole document."""
@@ -53,6 +95,68 @@ class Skill:
         if len(body) <= limit:
             return body
         return body[:limit].rsplit("\n", 1)[0] + "\n..."
+
+
+def _split_sections(text: str) -> list[tuple[str, str]]:
+    """Split markdown into (heading, body) pairs on ATX headings."""
+    sections: list[tuple[str, str]] = []
+    heading = ""
+    body: list[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            if heading or body:
+                sections.append((heading, "\n".join(body)))
+            heading = line.strip()
+            body = []
+        else:
+            body.append(line)
+    if heading or body:
+        sections.append((heading, "\n".join(body)))
+    return [s for s in sections if s[0] or s[1].strip()]
+
+
+# Keywords that are also ordinary English. They count in a heading, where the
+# author chose them deliberately, but not in prose -- "where fn is sum" must not
+# make an aggregation section look like a filter section.
+_WEAK_IN_BODY = {
+    "where", "if", "when", "map", "sum", "default", "missing", "branch",
+    "rank", "metric", "history", "unique", "case", "duplicate", "partition",
+}
+_NAV_HEADINGS = ("table of contents", "contents", "index", "toc", "see also")
+
+
+def _score_section(heading: str, body: str, keywords: list[str]) -> int:
+    """Keyword hits, counting the heading far more heavily than the body."""
+    head_low = heading.lower()
+    if any(nav in head_low for nav in _NAV_HEADINGS):
+        return 0                    # a contents list carries no rules
+    body_low = body.lower()[:4000]
+    # A section of nothing but short bare links is navigation, not knowledge.
+    substantive = any(
+        len(line.strip()) > 40 or "`" in line for line in body.splitlines()
+    )
+    score = 0
+    for keyword in keywords:
+        pattern = rf"\b{re.escape(keyword)}\b"
+        if re.search(pattern, head_low):
+            score += 10
+        if substantive and keyword not in _WEAK_IN_BODY:
+            score += min(3, len(re.findall(pattern, body_low)))
+    return score
+
+
+def _condense(heading: str, body: str) -> str:
+    """Keep the heading plus the rule-bearing lines beneath it."""
+    lines = [heading] if heading else []
+    for raw in body.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("- ", "* ", "|")) or re.match(r"^\d+[.)]\s", stripped):
+            lines.append(stripped)
+        elif len(lines) < 3:
+            lines.append(stripped)
+    return "\n".join(lines)
 
 
 def _topics_for(name: str, text: str) -> list[str]:
