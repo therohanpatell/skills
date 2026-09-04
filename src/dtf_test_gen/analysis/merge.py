@@ -152,5 +152,6 @@ def merge_llm(static: AnalysisResult, llm: LLMAnalysis, ddl: DDLSet) -> Analysis
     result.tables_ignored = sorted(
         t.name for t in ddl.tables if t.name not in used
     )
-    result.notes.extend(llm.notes[:5])
+    # Model prose is quarantined, not merged into the engine's findings.
+    result.model_notes.extend(str(note)[:300] for note in llm.notes[:5])
     return result

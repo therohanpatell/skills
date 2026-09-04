@@ -165,7 +165,10 @@ class AnalysisResult(BaseModel):
     tables_ignored: list[str] = Field(default_factory=list)
     required_columns: list[RequiredColumn] = Field(default_factory=list)
     transformations: list[Transformation] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)        # the engine's own findings
+    # Free text the model wrote. Never acted on, never parsed -- displayed
+    # separately so it is never mistaken for something the engine verified.
+    model_notes: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     source: str = "static"           # static | llm | hybrid | cache
     model: str | None = None

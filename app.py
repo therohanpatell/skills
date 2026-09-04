@@ -341,6 +341,14 @@ with tab_overview:
         with st.expander("Analysis notes"):
             for note in analysis.notes:
                 st.write("•", note)
+    if analysis.model_notes:
+        with st.expander(f"Model remarks ({len(analysis.model_notes)}) — unverified"):
+            st.caption(
+                "Written by the model. Nothing here was parsed or acted on; "
+                "it did not influence the generated rows or SQL."
+            )
+            for note in analysis.model_notes:
+                st.text(note)
     with st.expander("Run details"):
         st.write(f"**Source:** {analysis.source}  ·  **Model:** {analysis.model or '-'}")
         st.write("**Skills used:** " + (", ".join(analysis.skills_used) or "none"))

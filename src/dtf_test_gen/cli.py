@@ -70,6 +70,10 @@ def main(argv: list[str] | None = None) -> int:
     analysis = outcome.analysis
     for warning in analysis.warnings:
         console.print(f"[yellow]⚠ {warning}[/]")
+    for note in analysis.notes:
+        console.print(f"[dim]• {note}[/]")
+    for note in analysis.model_notes:
+        console.print(f"[dim]model remark (unverified): {note}[/]")
 
     generation = engine.generate(analysis, ddl)
 
