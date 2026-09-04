@@ -7,8 +7,11 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_MODEL = "qwen3:7b"
-KNOWN_MODELS = ["qwen3:7b", "qwen3:14b", "qwen3:32b"]
+DEFAULT_MODEL = "qwen3:8b"
+# Fallback list shown when Ollama is unreachable; installed models are otherwise
+# detected from the server. Qwen3 ships 0.6b/1.7b/4b/8b/14b/30b/32b -- there is
+# no 7b tag, so 8b is the small-model tier.
+KNOWN_MODELS = ["qwen3:8b", "qwen3:4b", "qwen3:14b", "qwen3:30b", "qwen3:32b"]
 
 
 @dataclass
@@ -16,7 +19,7 @@ class OllamaSettings:
     host: str = "http://localhost:11434"
     model: str = DEFAULT_MODEL
     temperature: float = 0.1
-    timeout: float = 180.0
+    timeout: float = 300.0
 
 
 @dataclass

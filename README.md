@@ -49,12 +49,36 @@ pip install -e .
 
 ```bash
 ollama serve
-ollama pull qwen3:7b
+ollama pull qwen3:8b
 ```
 
-`qwen3:7b` is the default. `qwen3:14b` and `qwen3:32b` also work — the model is
-read from `config.yaml` and can be changed in the sidebar. Installed models are
-detected automatically.
+`qwen3:8b` is the default. Qwen3 ships 0.6b / 1.7b / 4b / 8b / 14b / 30b / 32b —
+there is no 7b tag. The model is read from `config.yaml` and can be changed in
+the sidebar; installed models are detected automatically.
+
+### Choosing a model
+
+The app sends one small call (~1.3k prompt tokens, a few hundred tokens of JSON
+back), so this is a light workload — model choice is about accuracy on the
+unclassified expressions, not throughput.
+
+On a **CPU-only machine** speed is bound by memory bandwidth, not RAM capacity,
+so a model that *fits* is not necessarily a model you want to wait for:
+
+| Model | ~Disk | Fits in 32 GB | CPU-only feel |
+|---|---|---|---|
+| `qwen3:4b` | ~2.5 GB | easily | fastest; fine when the parser handles most of the DTF |
+| `qwen3:8b` | ~5 GB | easily | **recommended default** — good accuracy, seconds per call |
+| `qwen3:14b` | ~9 GB | yes | noticeably slower, modest accuracy gain |
+| `qwen3:30b` (MoE) | ~18 GB | yes | 30B total but only ~3B active per token, so it runs far closer to 8b speed than its size suggests — the best accuracy-per-second option on CPU |
+| `qwen3:32b` | ~20 GB | yes, but tight | dense 32B on CPU is slow; use only with a GPU |
+
+If you have a discrete GPU, whatever fits in VRAM wins. Without one, start at
+`qwen3:8b` and try `qwen3:30b` if you want more reasoning power.
+
+You can also skip the model entirely — uncheck **Use Ollama** for deterministic
+analysis only, which handles a DTF whose expressions the parser already
+understands.
 
 The app runs without Ollama too: uncheck **Use Ollama** and it falls back to
 deterministic analysis only.
@@ -187,7 +211,7 @@ Copy `config.yaml.example` to `config.yaml` and edit. Sidebar settings override 
 ```yaml
 ollama:
   host: http://localhost:11434
-  model: qwen3:7b
+  model: qwen3:8b
   temperature: 0.1
 
 generation:

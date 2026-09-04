@@ -1,8 +1,8 @@
 ollama:
   host: http://localhost:11434
-  model: qwen3:7b
+  model: qwen3:8b
   temperature: 0.1
-  timeout: 180
+  timeout: 300
 
 generation:
   max_rows: 50
