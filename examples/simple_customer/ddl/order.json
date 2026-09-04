@@ -1,0 +1,13 @@
+{
+  "project": "analytics_demo",
+  "dataset": "raw",
+  "table": "order",
+  "columns": [
+    {"name": "order_id",     "type": "INT64",  "mode": "REQUIRED"},
+    {"name": "customer_id",  "type": "INT64",  "mode": "REQUIRED", "description": "FK to customer"},
+    {"name": "amount",       "type": "NUMERIC","mode": "NULLABLE"},
+    {"name": "order_date",   "type": "DATE",   "mode": "NULLABLE"},
+    {"name": "channel",      "type": "STRING", "mode": "NULLABLE"},
+    {"name": "warehouse_ref","type": "STRING", "mode": "NULLABLE", "description": "Logistics only, not consumed"}
+  ]
+}

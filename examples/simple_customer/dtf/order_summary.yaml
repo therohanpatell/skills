@@ -1,0 +1,21 @@
+name: order_summary
+description: Daily order totals per customer, domestic channel only.
+target:
+  project: analytics_demo
+  dataset: cdp
+  table: order_summary
+sources:
+  - order
+filters:
+  - column: channel
+    operator: "="
+    value: WEB
+group_by:
+  - customer_id
+aggregates:
+  - SUM(amount)
+mappings:
+  - target: customer_id
+    source: customer_id
+  - target: total_amount
+    expression: SUM(amount)

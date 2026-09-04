@@ -1,0 +1,15 @@
+{
+  "project": "analytics_demo",
+  "dataset": "raw",
+  "table": "customer",
+  "columns": [
+    {"name": "customer_id",   "type": "INT64",     "mode": "REQUIRED", "description": "Natural key"},
+    {"name": "name",          "type": "STRING",    "mode": "REQUIRED", "description": "Customer full name"},
+    {"name": "status",        "type": "STRING",    "mode": "NULLABLE", "description": "ACTIVE / INACTIVE / CLOSED"},
+    {"name": "country",       "type": "STRING",    "mode": "NULLABLE", "description": "ISO-2 country code, may be NULL"},
+    {"name": "segment",       "type": "STRING",    "mode": "NULLABLE", "description": "Marketing segment"},
+    {"name": "created_at",    "type": "TIMESTAMP", "mode": "NULLABLE", "description": "Record creation time"},
+    {"name": "internal_flag", "type": "BOOL",      "mode": "NULLABLE", "description": "Internal-only, never consumed"},
+    {"name": "notes",         "type": "STRING",    "mode": "NULLABLE", "description": "Free text, never consumed"}
+  ]
+}

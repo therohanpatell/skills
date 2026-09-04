@@ -1,0 +1,10 @@
+{
+  "name": "customer_transform",
+  "description": "Active customers enriched with their order value band.",
+  "target": {
+    "project": "analytics_demo",
+    "dataset": "fdp",
+    "table": "customer_fdp"
+  },
+  "sql": "SELECT c.customer_id AS customer_id, c.name AS name, COALESCE(c.country, 'UNKNOWN') AS country, CASE WHEN o.amount > 100 THEN 'HIGH' ELSE 'LOW' END AS value_band, o.order_id AS order_id FROM raw.customer c LEFT JOIN raw.order o ON c.customer_id = o.customer_id WHERE c.status = 'ACTIVE'"
+}

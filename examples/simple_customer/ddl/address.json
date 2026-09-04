@@ -1,0 +1,11 @@
+{
+  "project": "analytics_demo",
+  "dataset": "raw",
+  "table": "address",
+  "columns": [
+    {"name": "address_id",  "type": "INT64",  "mode": "REQUIRED"},
+    {"name": "customer_id", "type": "INT64",  "mode": "REQUIRED"},
+    {"name": "city",        "type": "STRING", "mode": "NULLABLE"},
+    {"name": "postcode",    "type": "STRING", "mode": "NULLABLE"}
+  ]
+}
