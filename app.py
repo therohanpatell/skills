@@ -25,6 +25,7 @@ from dtf_test_gen.sql.writer import render_all, render_insert              # noq
 from dtf_test_gen import ui_helpers as ui                                  # noqa: E402
 
 EXAMPLE_PROJECT = "./examples/simple_customer"
+KNOWLEDGE_DIR = "./knowledge"
 
 st.set_page_config(page_title="DTF Test Data Generator", page_icon="🧪", layout="wide")
 
@@ -162,12 +163,28 @@ with st.sidebar:
     ddl = DDLSet(tables=selected_tables)
 
     # ---- Skills ------------------------------------------------------
-    st.subheader("DTF skills")
+    st.subheader("Knowledge")
+    knowledge_dir = st.text_input(
+        "Knowledge folder", value=state("knowledge_dir", KNOWLEDGE_DIR),
+        key="knowledge_dir",
+        help="Every Markdown file in this folder is treated as knowledge and is "
+             "always eligible, whatever it is called.",
+    )
     skills = []
+    knowledge_found = discover_project(knowledge_dir) if knowledge_dir else None
+    if knowledge_found and knowledge_found.skills:
+        skills = load_skills(list(knowledge_found.skills))
+        for skill in skills:
+            skill.always = True
+        st.caption(f"{len(skills)} knowledge file(s) found.")
+    elif knowledge_dir:
+        st.caption("No Markdown files in that folder yet.")
+
     if mode == "Local project" and skill_paths:
-        skills = load_skills(list(skill_paths))
+        seen = {Path(s.path).name for s in skills if s.path}
+        skills += [s for s in load_skills(list(skill_paths)) if s.name not in seen]
     elif uploaded_skills:
-        skills = [
+        skills += [
             load_skill_payload(u.name, u.getvalue().decode("utf-8", "replace"))
             for u in uploaded_skills
         ]
@@ -221,6 +238,13 @@ with st.sidebar:
     )
     use_cache = st.checkbox("Cache analysis", value=config.cache.enabled)
     max_rows = st.number_input("Max rows per table", 1, 500, config.generation.max_rows)
+    include_not_null = st.checkbox(
+        "Include NOT NULL columns", value=True,
+        help="On: also emit REQUIRED columns the transformation never reads, "
+             "because BigQuery rejects an INSERT without them. Off: emit only "
+             "transformation-relevant columns — smaller SQL, but the INSERT "
+             "fails unless your target table allows those columns to be empty.",
+    )
 
     engine = Engine(config)
     analyse_clicked = st.button("Analyze DTF", type="primary", use_container_width=True)
@@ -282,7 +306,9 @@ for warning in analysis.warnings:
 
 # Generation runs automatically once analysis exists, and again on demand.
 if st.session_state.get("generation") is None:
-    st.session_state["generation"] = engine.generate(analysis, ddl, max_rows=int(max_rows))
+    st.session_state["generation"] = engine.generate(
+        analysis, ddl, max_rows=int(max_rows), include_not_null=include_not_null,
+    )
 generation = st.session_state["generation"]
 
 tab_overview, tab_transforms, tab_scenarios, tab_data, tab_sql = st.tabs(
@@ -304,11 +330,21 @@ with tab_overview:
     c[2].metric("Unused columns", stats["unused_columns"])
     c[3].metric("NOT NULL fillers", stats["not_null_fillers"])
 
-    c = st.columns(3)
+    c = st.columns(4)
     c[0].metric("Generated source rows", generation.total_rows)
     c[1].metric("Scenarios", len(generation.scenarios))
+    emitted = sum(len(t.columns) for t in generation.tables)
+    total_cols = sum(
+        len(tbl.columns) for tbl in ddl.tables
+        if tbl.name in {g.table for g in generation.tables}
+    )
+    c[2].metric(
+        "Columns in SQL", f"{emitted} of {total_cols}",
+        f"-{total_cols - emitted} omitted" if total_cols > emitted else None,
+        delta_color="normal",
+    )
     coverage = generation.coverage
-    c[2].metric("Coverage", f"{coverage.percent}%", f"{coverage.covered}/{coverage.total} paths")
+    c[3].metric("Coverage", f"{coverage.percent}%", f"{coverage.covered}/{coverage.total} paths")
 
     if coverage.missing:
         st.error(
@@ -349,11 +385,28 @@ with tab_overview:
             )
             for note in analysis.model_notes:
                 st.text(note)
+    if outcome and (outcome.knowledge_used or outcome.knowledge_skipped):
+        with st.expander(
+            f"Knowledge sent to the model ({len(outcome.knowledge_used)} file(s))"
+        ):
+            st.caption(
+                "Every file in the knowledge folder is eligible. Only the sections "
+                "matching this DTF are sent, so a file with nothing relevant to say "
+                "contributes nothing and costs no tokens."
+            )
+            for name, size in sorted(
+                outcome.knowledge_used.items(), key=lambda kv: -kv[1]
+            ):
+                st.write(f"✓ **{name}** — {size} characters")
+            for name in outcome.knowledge_skipped:
+                st.write(f"· {name} — no section matched this transformation")
+
     with st.expander("Run details"):
         st.write(f"**Source:** {analysis.source}  ·  **Model:** {analysis.model or '-'}")
         st.write("**Skills used:** " + (", ".join(analysis.skills_used) or "none"))
         if outcome:
             st.write(f"**Ollama called:** {'yes' if outcome.llm_called else 'no'}")
+            st.write(f"**Prompt size:** ~{outcome.prompt_tokens} tokens")
 
 # ------------------------------------------------------------- transformations
 with tab_transforms:

@@ -117,6 +117,49 @@ Press **Example** in the sidebar to load `examples/simple_customer`, then
 **Analyze DTF**. It demonstrates a filter, a `CASE WHEN` conditional, a
 `LEFT JOIN` with both match and no-match paths, and `COALESCE` NULL handling.
 
+## Knowledge folder
+
+`knowledge/` starts empty. Drop your project's DTF documentation in it — **every
+Markdown file there is treated as knowledge and is always eligible**, whatever
+it is called. There is no required filename and no keyword gate.
+
+```
+knowledge/
+├── operations-catalog.md
+├── transformation-parameter-reference.md
+├── json-config-reference.md
+└── ... whatever you have
+```
+
+Files are split on their Markdown headings, and the sections matching what the
+selected DTF actually does are sent to the model, up to a shared budget of
+~3,600 characters per run. So:
+
+- A large reference contributes only its relevant sections, never its contents page.
+- A file with nothing to say about this DTF contributes nothing and costs no tokens.
+- Sections compete across files, so three strong sections of one document beat
+  one weak section from each of three documents.
+- Sections headed *audit columns*, *domain codes*, *conventions* and similar
+  always score, because they help whatever the transformation does.
+
+To make a section rank, put the feature in its **heading** (`## Join Operations`,
+`## Filter Expressions`) and the rules in bullets beneath it — headings are
+weighted far more heavily than body text.
+
+The **Knowledge sent to the model** expander on the Overview tab shows exactly
+which files contributed and how much, so nothing is silently ignored.
+
+## Wide tables
+
+A source table with 200+ columns is the normal case, and only the columns the
+transformation reads reach the `INSERT`. On a 223-column fixture the app emits
+**18 columns**, omitting 205, at 100% coverage.
+
+Of those 18, some are `NOT NULL FILLER` — columns the transformation never reads
+but BigQuery would reject the INSERT without. Untick **Include NOT NULL columns**
+in the sidebar to drop them too, which is right when your target test table
+allows them to be empty and wrong when it does not.
+
 ## Project layout the app expects
 
 Filenames are never assumed — everything is discovered by inspecting the files.

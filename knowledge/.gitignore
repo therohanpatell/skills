@@ -1,0 +1,4 @@
+# Your knowledge files stay local. Delete this file to commit them instead.
+*
+!.gitignore
+!.gitkeep

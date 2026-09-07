@@ -55,6 +55,9 @@ class AnalysisOutcome:
     llm_error: str | None = None
     prompt_tokens: int = 0
     messages: list[str] = field(default_factory=list)
+    # Which knowledge files actually contributed, and how many characters each.
+    knowledge_used: dict[str, int] = field(default_factory=dict)
+    knowledge_skipped: list[str] = field(default_factory=list)
 
 
 class Engine:
@@ -114,7 +117,15 @@ class Engine:
         client = OllamaClient(
             host=host or self.config.ollama.host, timeout=self.config.ollama.timeout
         )
-        outcome = AnalysisOutcome(analysis=static, prompt_tokens=bundle.approx_tokens)
+        knowledge = bundle.payload.get("knowledge", {})
+        outcome = AnalysisOutcome(
+            analysis=static,
+            prompt_tokens=bundle.approx_tokens,
+            knowledge_used={name: len(body) for name, body in knowledge.items()},
+            knowledge_skipped=[
+                s.name for s in skills if s.selected and s.name not in knowledge
+            ],
+        )
 
         try:
             if progress:
@@ -160,14 +171,23 @@ class Engine:
         return outcome
 
     # --------------------------------------------------------------- generate
-    def generate(self, analysis: AnalysisResult, ddl: DDLSet, max_rows: int | None = None) -> GenerationResult:
+    def generate(
+        self,
+        analysis: AnalysisResult,
+        ddl: DDLSet,
+        max_rows: int | None = None,
+        include_not_null: bool = True,
+    ) -> GenerationResult:
         """Pack paths into scenarios, build rows, verify coverage, repair gaps."""
         limit = max_rows or self.config.generation.max_rows
         scenarios = build_scenarios(analysis)
-        result = RowBuilder(analysis, ddl, max_rows=limit).build(scenarios)
+        result = RowBuilder(
+            analysis, ddl, max_rows=limit, include_not_null=include_not_null,
+        ).build(scenarios)
         result = repair_coverage(
             analysis, result, ddl,
             max_rows=limit, max_passes=self.config.generation.max_retries,
+            include_not_null=include_not_null,
         )
         return result
 

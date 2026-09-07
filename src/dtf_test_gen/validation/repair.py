@@ -19,6 +19,7 @@ def repair_coverage(
     ddl: DDLSet,
     max_rows: int = 50,
     max_passes: int = 2,
+    include_not_null: bool = True,
 ) -> GenerationResult:
     """Re-run generation with a dedicated scenario per missing path."""
     report = evaluate_coverage(analysis, generation)
@@ -46,7 +47,9 @@ def repair_coverage(
             ))
             repaired.append(path_id)
 
-        builder = RowBuilder(analysis, ddl, max_rows=max_rows)
+        builder = RowBuilder(
+            analysis, ddl, max_rows=max_rows, include_not_null=include_not_null,
+        )
         generation = builder.build(scenarios)
         report = evaluate_coverage(analysis, generation)
 

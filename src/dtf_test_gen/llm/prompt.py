@@ -7,10 +7,11 @@ real DTF feature, and only the expressions static parsing could not classify.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from dtf_test_gen.loaders.skills import Skill, dtf_signals
+from dtf_test_gen.loaders.skills import Skill, dtf_signals, pack_knowledge
 from dtf_test_gen.models.analysis import AnalysisResult, ColumnRole
 from dtf_test_gen.models.dtf import DTFConfig
 from dtf_test_gen.models.schema import DDLSet
@@ -49,10 +50,16 @@ def build_prompt(
     skills: list[Skill],
     deep: bool = False,
 ) -> PromptBundle:
-    interesting_roles = {
-        rc.role for rc in static.required_columns
+    unparsed = [w.split("`")[1] for w in static.warnings if "not understood" in w and "`" in w]
+    if deep:
+        unparsed += [
+            m.expression for m in config.mappings
+            if m.expression and not m.is_one_to_one
+        ][:10]
+    unparsed_columns = {
+        token for expr in unparsed
+        for token in re.findall(r"[A-Za-z_]\w*", expr)
     }
-    del interesting_roles       # roles are read per-column below
 
     tables_payload: dict[str, list[dict]] = {}
     for name in static.tables_used or config.source_tables:
@@ -63,7 +70,7 @@ def build_prompt(
         for rc in static.required_columns:
             if rc.table.lower() != table.name.lower():
                 continue
-            if rc.role == ColumnRole.UNUSED and not deep:
+            if rc.role == ColumnRole.UNUSED:
                 continue        # never spend tokens describing unused columns
             entries.append({
                 "column": rc.column,
@@ -71,7 +78,21 @@ def build_prompt(
                 "nullable": rc.nullable,
                 "static_role": rc.role.value,
             })
-        tables_payload[table.name] = entries[:MAX_COLUMNS_PER_TABLE]
+        # A 220-column table can still leave more used columns than the cap.
+        # Anything an unparsed expression names must survive the trim, or the
+        # model is asked to classify a column it was never shown.
+        named = {c.lower() for c in unparsed_columns}
+        entries.sort(key=lambda e: (
+            e["column"].lower() not in named,
+            e["static_role"] == ColumnRole.NOT_NULL_FILLER.value,
+            e["static_role"] == ColumnRole.ONE_TO_ONE.value,
+        ))
+        trimmed = entries[:MAX_COLUMNS_PER_TABLE]
+        if len(entries) > len(trimmed):
+            trimmed.append({"_note": f"{len(entries) - len(trimmed)} further "
+                                     "columns omitted; they are not referenced "
+                                     "by any unclassified expression."})
+        tables_payload[table.name] = trimmed
 
     transformation_payload = {
         "target": config.target_table,
@@ -93,27 +114,17 @@ def build_prompt(
         "dedup_keys": config.dedup_keys,
     }
 
-    unparsed = [w.split("`")[1] for w in static.warnings if "not understood" in w and "`" in w]
-    if deep:
-        unparsed += [
-            m.expression for m in config.mappings
-            if m.expression and not m.is_one_to_one
-        ][:10]
-
     payload = {
         "tables": tables_payload,
         "transformation": transformation_payload,
         "unparsed": unparsed,
     }
 
-    selected_skills = [s for s in skills if s.selected][:MAX_SKILLS]
-    if selected_skills:
-        # Send the part of each document that matches what this DTF actually
-        # does, rather than whatever happens to sit at the top of the file.
-        wanted = set(dtf_signals(config))
-        payload["skills"] = {
-            s.name: s.relevant_excerpt(wanted) for s in selected_skills
-        }
+    # One shared budget across every selected knowledge file, so a deep
+    # reference can contribute several sections and an irrelevant file none.
+    knowledge = pack_knowledge(skills, set(dtf_signals(config)))
+    if knowledge:
+        payload["knowledge"] = knowledge
 
     instruction = (
         "Analyse this transformation and return the JSON object described in your "

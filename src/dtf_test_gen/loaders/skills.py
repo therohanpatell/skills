@@ -30,6 +30,11 @@ _TOPICS: dict[str, tuple[tuple[str, ...], str]] = {
 MAX_EXCERPT_CHARS = 900
 
 
+KNOWLEDGE_DIRS = {"knowledge", "skills", "dtf-json-skill"}
+# Total characters of knowledge sent per run, across all files.
+KNOWLEDGE_BUDGET = 3600
+
+
 @dataclass
 class Skill:
     name: str
@@ -38,6 +43,9 @@ class Skill:
     topics: list[str] = field(default_factory=list)
     selected: bool = False
     reason: str = ""
+    # True when the file sits in a knowledge folder: the user filed it as
+    # knowledge, so it is always eligible regardless of topic matching.
+    always: bool = False
 
     def relevant_excerpt(self, topics: set[str], limit: int = MAX_EXCERPT_CHARS) -> str:
         """Return the sections of this document that match the DTF's features.
@@ -123,6 +131,14 @@ _WEAK_IN_BODY = {
     "rank", "metric", "history", "unique", "case", "duplicate", "partition",
 }
 _NAV_HEADINGS = ("table of contents", "contents", "index", "toc", "see also")
+# Sections that help whatever the DTF happens to do: the project's real code
+# values, and the columns the framework writes for itself. These score below a
+# direct topic match, so a relevant join section still outranks them.
+_ALWAYS_RELEVANT = (
+    "audit", "domain", "convention", "reserved", "metadata", "enum",
+    "glossary", "codes", "values", "lookup values", "technical column",
+)
+_ALWAYS_SCORE = 5
 
 
 def _score_section(heading: str, body: str, keywords: list[str]) -> int:
@@ -142,6 +158,8 @@ def _score_section(heading: str, body: str, keywords: list[str]) -> int:
             score += 10
         if substantive and keyword not in _WEAK_IN_BODY:
             score += min(3, len(re.findall(pattern, body_low)))
+    if not score and substantive and any(k in head_low for k in _ALWAYS_RELEVANT):
+        score = _ALWAYS_SCORE
     return score
 
 
@@ -181,8 +199,19 @@ def _topics_for(name: str, text: str) -> list[str]:
     return found
 
 
+def _in_knowledge_dir(path: str | None) -> bool:
+    if not path:
+        return False
+    parts = {part.lower() for part in Path(path).parts[:-1]}
+    return bool(parts & KNOWLEDGE_DIRS)
+
+
 def load_skill_payload(name: str, text: str, path: str | None = None) -> Skill:
-    return Skill(name=name, path=path, text=text, topics=_topics_for(name, text))
+    return Skill(
+        name=name, path=path, text=text,
+        topics=_topics_for(name, text),
+        always=_in_knowledge_dir(path),
+    )
 
 
 def load_skills(paths: list[str | Path]) -> list[Skill]:
@@ -234,10 +263,69 @@ def auto_select(skills: list[Skill], config: DTFConfig) -> list[Skill]:
     signals = dtf_signals(config)
     for skill in skills:
         matched = [t for t in skill.topics if t in signals]
-        if matched:
+        if skill.always:
+            skill.selected = True
+            skill.reason = (
+                f"In a knowledge folder — always included"
+                + (f" (matches {matched[0]})" if matched else "")
+            )
+        elif matched:
             skill.selected = True
             skill.reason = signals[matched[0]]
         else:
             skill.selected = False
             skill.reason = "No matching transformation feature found in the DTF."
     return skills
+
+
+def pack_knowledge(
+    skills: list[Skill], topics: set[str], budget: int = KNOWLEDGE_BUDGET
+) -> dict[str, str]:
+    """Fill one shared budget with the best sections across every selected file.
+
+    Ranking across files rather than truncating each one separately means a
+    single deep reference document can contribute several relevant sections,
+    while a file with nothing to say about this DTF contributes none -- instead
+    of every file getting an equal slice of a budget it cannot use.
+    """
+    selected = [s for s in skills if s.selected]
+    if not selected:
+        return {}
+
+    keywords: list[str] = []
+    for topic in topics:
+        keywords.extend(_TOPICS.get(topic, ((), ""))[0])
+
+    candidates: list[tuple[int, int, str, str]] = []
+    for order, skill in enumerate(selected):
+        sections = _split_sections(skill.text)
+        for index, (heading, body) in enumerate(sections):
+            text = _condense(heading, body)
+            if not text.strip():
+                continue
+            score = _score_section(heading, body, keywords) if keywords else 0
+            if len(sections) == 1 and not score:
+                score = 1        # a single-section file still deserves a look
+            if score:
+                candidates.append((score, order * 1000 + index, skill.name, text))
+
+    if not candidates:
+        # Nothing matched on topic; fall back to a fair slice of each file.
+        share = max(300, budget // len(selected))
+        return {s.name: s.excerpt(share) for s in selected}
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    packed: dict[str, list[tuple[int, str]]] = {}
+    used = 0
+    for _score, order, name, text in candidates:
+        if used + len(text) + 1 > budget:
+            continue
+        packed.setdefault(name, []).append((order, text))
+        used += len(text) + 1
+    if not packed:
+        best_score, order, name, text = candidates[0]
+        return {name: text[:budget].rsplit("\n", 1)[0] + "\n..."}
+    return {
+        name: "\n".join(t for _o, t in sorted(chunks))
+        for name, chunks in packed.items()
+    }

@@ -9,7 +9,9 @@ Python does all of that. You only report requirements as JSON.
 - `tables`: the source tables and only the columns the transformation touches.
 - `transformation`: the parsed DTF (joins, predicates, grouping, mappings).
 - `unparsed`: expressions Python could not classify. **These matter most.**
-- `skills`: excerpts of the project's DTF conventions, when relevant.
+- `knowledge`: the sections of the project's own DTF documentation that
+  match this transformation. Treat these as authoritative about how this
+  project writes transformations.
 
 ## Your job
 
@@ -17,6 +19,8 @@ Python does all of that. You only report requirements as JSON.
    comparison it makes. Emit one entry in `transformations`.
 2. Correct any column role in `column_roles` that the static parse got wrong,
    and only those. Do not restate roles that are already right.
+   A table entry may end with a `_note` saying further columns were omitted;
+   that is context, not a column.
 3. Keep it short. Empty lists are a good answer when nothing needs correcting.
 
 ## Output

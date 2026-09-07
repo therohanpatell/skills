@@ -25,8 +25,16 @@ ORPHAN_INT = 999999
 ORPHAN_STR = "NO_MATCH_KEY"
 
 
-def _emitted_columns(table: Table, analysis: AnalysisResult) -> tuple[list[str], list[str]]:
-    """(columns to emit, columns deliberately omitted)."""
+def _emitted_columns(
+    table: Table, analysis: AnalysisResult, include_not_null: bool = True
+) -> tuple[list[str], list[str]]:
+    """(columns to emit, columns deliberately omitted).
+
+    Transformation-critical columns always ship. REQUIRED columns ship too
+    unless the caller opts out: BigQuery rejects an INSERT that omits a
+    REQUIRED column with no default, but on a 200-column table that can be
+    most of the statement, and a permissive test table does not need them.
+    """
     roles = {
         rc.column.lower(): rc for rc in analysis.required_columns
         if rc.table.lower() == table.name.lower()
@@ -38,8 +46,7 @@ def _emitted_columns(table: Table, analysis: AnalysisResult) -> tuple[list[str],
         role = rc.role if rc else ColumnRole.UNUSED
         if role.transformation_critical:
             emit.append(column.name)
-        elif column.required:
-            # BigQuery rejects the INSERT without it, so a simple value goes in.
+        elif column.required and include_not_null:
             emit.append(column.name)
         else:
             omit.append(column.name)
@@ -72,10 +79,14 @@ def _pick_constraint(constraints: list[Constraint]) -> Constraint:
 class RowBuilder:
     """Builds rows for every table, keeping join keys consistent across tables."""
 
-    def __init__(self, analysis: AnalysisResult, ddl: DDLSet, max_rows: int = 50):
+    def __init__(
+        self, analysis: AnalysisResult, ddl: DDLSet, max_rows: int = 50,
+        include_not_null: bool = True,
+    ):
         self.analysis = analysis
         self.ddl = ddl
         self.max_rows = max_rows
+        self.include_not_null = include_not_null
         self.warnings: list[str] = []
         self._join_seq = 0
 
@@ -86,7 +97,7 @@ class RowBuilder:
 
         generated: dict[str, GeneratedTable] = {}
         for table in tables:
-            emit, omit = _emitted_columns(table, self.analysis)
+            emit, omit = _emitted_columns(table, self.analysis, self.include_not_null)
             generated[table.name] = GeneratedTable(
                 table=table.name, fq_name=table.fq_name, columns=emit, omitted_columns=omit,
             )
