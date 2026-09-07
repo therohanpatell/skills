@@ -7,6 +7,8 @@ column roles. It can never remove a path.
 
 from __future__ import annotations
 
+import re
+
 from dtf_test_gen.analysis.predicates import ParsedPredicate, build_predicate_transformation
 from dtf_test_gen.models.analysis import AnalysisResult, ColumnRole, ConstraintOp, RequiredColumn
 from dtf_test_gen.models.llm import LLMAnalysis
@@ -65,7 +67,41 @@ def _promote(result: AnalysisResult, table, column_name: str, role: ColumnRole, 
     ))
 
 
-def merge_llm(static: AnalysisResult, llm: LLMAnalysis, ddl: DDLSet) -> AnalysisResult:
+def _normalise(text: str) -> list[str]:
+    return [tok for tok in re.findall(r"[A-Za-z0-9_.']+", str(text or "").lower()) if tok]
+
+
+def _citation_matches(citation: str, allowed: list[str]) -> str | None:
+    """Return the allowed expression a citation refers to, or None.
+
+    Matching is deliberately loose -- a model may requote with different
+    spacing or quoting -- but it must genuinely overlap something that was
+    sent, so a citation of an expression that does not exist fails.
+    """
+    cited = _normalise(citation)
+    if not cited:
+        return None
+    cited_set = set(cited)
+    for expression in allowed:
+        tokens = set(_normalise(expression))
+        if not tokens:
+            continue
+        overlap = len(cited_set & tokens)
+        if overlap and overlap >= max(1, int(0.6 * min(len(cited_set), len(tokens)))):
+            return expression
+        joined_c = " ".join(cited)
+        joined_e = " ".join(_normalise(expression))
+        if joined_c and (joined_c in joined_e or joined_e in joined_c):
+            return expression
+    return None
+
+
+def merge_llm(
+    static: AnalysisResult,
+    llm: LLMAnalysis,
+    ddl: DDLSet,
+    allowed_expressions: list[str] | None = None,
+) -> AnalysisResult:
     result = static.model_copy(deep=True)
     result.source = "hybrid"
 
@@ -76,7 +112,21 @@ def merge_llm(static: AnalysisResult, llm: LLMAnalysis, ddl: DDLSet) -> Analysis
     counter = len(result.transformations)
     added = 0
 
+    allowed = [e for e in (allowed_expressions or []) if str(e).strip()]
+    rejected_uncited = 0
+
     for item in llm.transformations:
+        # A transformation is only admissible if it was read out of something
+        # the engine actually sent. With nothing unclassified, static parsing
+        # understood the whole config and there is nothing left to discover --
+        # so any rule offered here is invented, however plausible it looks.
+        if not allowed:
+            rejected_uncited += 1
+            continue
+        cited = _citation_matches(item.source_expression, allowed)
+        if cited is None:
+            rejected_uncited += 1
+            continue
         table_obj = ddl.get(item.table)
         if not table_obj:
             result.notes.append(f"Model referenced unknown table `{item.table}`; ignored.")
@@ -100,7 +150,7 @@ def merge_llm(static: AnalysisResult, llm: LLMAnalysis, ddl: DDLSet) -> Analysis
             alias=None, column=item.column, op=op,
             value=item.value, values=item.values,
         )
-        expression = item.description or f"{item.table}.{item.column} {item.operator} {item.value}"
+        expression = cited
         result.transformations.append(
             build_predicate_transformation(f"T{counter:03d}", table_obj.name, parsed, expression, kind)
         )
@@ -112,6 +162,15 @@ def merge_llm(static: AnalysisResult, llm: LLMAnalysis, ddl: DDLSet) -> Analysis
 
     if added:
         result.notes.append(f"Model contributed {added} transformation(s) static parsing missed.")
+    if rejected_uncited:
+        reason = (
+            "nothing was left unclassified for it to read"
+            if not allowed else
+            "they cited no expression that was actually sent"
+        )
+        result.notes.append(
+            f"Rejected {rejected_uncited} model transformation(s): {reason}."
+        )
 
     # Role corrections: only upgrade to a critical role, never silently downgrade
     # a column Python proved is used.

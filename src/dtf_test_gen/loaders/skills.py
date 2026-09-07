@@ -131,6 +131,13 @@ _WEAK_IN_BODY = {
     "rank", "metric", "history", "unique", "case", "duplicate", "partition",
 }
 _NAV_HEADINGS = ("table of contents", "contents", "index", "toc", "see also")
+# Identifiers too generic to signal relevance if they appear in a document.
+_VOCAB_STOPWORDS = {
+    "select", "from", "where", "and", "the", "not", "null", "true", "false",
+    "join", "left", "right", "inner", "outer", "full", "case", "when", "then",
+    "else", "end", "coalesce", "date", "timestamp", "string", "int64", "table",
+    "column", "value", "values", "name", "type", "with", "for", "all", "any",
+}
 # Sections that help whatever the DTF happens to do: the project's real code
 # values, and the columns the framework writes for itself. These score below a
 # direct topic match, so a relevant join section still outranks them.
@@ -141,7 +148,56 @@ _ALWAYS_RELEVANT = (
 _ALWAYS_SCORE = 5
 
 
-def _score_section(heading: str, body: str, keywords: list[str]) -> int:
+def dtf_vocabulary(config: DTFConfig) -> set[str]:
+    """The identifiers this specific DTF actually uses.
+
+    Topic keywords are this tool's vocabulary; a project writes its docs in its
+    own. Scoring against the config's real table names, column names, operation
+    names and literals matches a section headed "Row Restriction Rules" that
+    never contains the word "filter", which keyword scoring cannot.
+    """
+    tokens: set[str] = set()
+
+    def add(text: object) -> None:
+        for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", str(text or "")):
+            low = tok.lower()
+            if low not in _VOCAB_STOPWORDS:
+                tokens.add(low)
+
+    for name in config.source_tables:
+        add(name)
+    add(config.target_table)
+    for spec in config.predicates:
+        add(spec.expression)
+    for join in config.joins:
+        add(f"{join.left_table} {join.left_column} {join.right_table} "
+            f"{join.right_column} {join.join_type}")
+    for mapping in config.mappings:
+        add(mapping.source_column)
+        add(mapping.expression)
+    for group in (config.group_by, config.order_by, config.aggregates,
+                  config.dedup_keys, config.window_partitions):
+        for item in group:
+            add(item)
+
+    # Operation names as the config itself spells them: {"op": "dedupe"}.
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if str(key).lower() in {"op", "type", "kind", "operation", "function"}:
+                    add(value)
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(config.raw)
+    return tokens
+
+
+def _score_section(
+    heading: str, body: str, keywords: list[str], vocabulary: set[str] | None = None
+) -> int:
     """Keyword hits, counting the heading far more heavily than the body."""
     head_low = heading.lower()
     if any(nav in head_low for nav in _NAV_HEADINGS):
@@ -158,6 +214,13 @@ def _score_section(heading: str, body: str, keywords: list[str]) -> int:
             score += 10
         if substantive and keyword not in _WEAK_IN_BODY:
             score += min(3, len(re.findall(pattern, body_low)))
+    # The DTF's own identifiers are a stronger relevance signal than this
+    # tool's keyword list, and they work whatever vocabulary the docs use.
+    if vocabulary and substantive:
+        head_tokens = set(re.findall(r"[a-z_][a-z0-9_]{2,}", head_low))
+        body_tokens = set(re.findall(r"[a-z_][a-z0-9_]{2,}", body_low))
+        score += 6 * len(head_tokens & vocabulary)
+        score += 2 * min(6, len(body_tokens & vocabulary))
     if not score and substantive and any(k in head_low for k in _ALWAYS_RELEVANT):
         score = _ALWAYS_SCORE
     return score
@@ -279,7 +342,10 @@ def auto_select(skills: list[Skill], config: DTFConfig) -> list[Skill]:
 
 
 def pack_knowledge(
-    skills: list[Skill], topics: set[str], budget: int = KNOWLEDGE_BUDGET
+    skills: list[Skill],
+    topics: set[str],
+    budget: int = KNOWLEDGE_BUDGET,
+    vocabulary: set[str] | None = None,
 ) -> dict[str, str]:
     """Fill one shared budget with the best sections across every selected file.
 
@@ -303,14 +369,14 @@ def pack_knowledge(
             text = _condense(heading, body)
             if not text.strip():
                 continue
-            score = _score_section(heading, body, keywords) if keywords else 0
+            score = _score_section(heading, body, keywords, vocabulary)
             if len(sections) == 1 and not score:
                 score = 1        # a single-section file still deserves a look
             if score:
                 candidates.append((score, order * 1000 + index, skill.name, text))
 
     if not candidates:
-        # Nothing matched on topic; fall back to a fair slice of each file.
+        # Nothing matched at all; fall back to a fair slice of each file.
         share = max(300, budget // len(selected))
         return {s.name: s.excerpt(share) for s in selected}
 

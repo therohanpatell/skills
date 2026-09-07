@@ -11,7 +11,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from dtf_test_gen.loaders.skills import Skill, dtf_signals, pack_knowledge
+from dtf_test_gen.loaders.skills import (
+    Skill, dtf_signals, dtf_vocabulary, pack_knowledge,
+)
 from dtf_test_gen.models.analysis import AnalysisResult, ColumnRole
 from dtf_test_gen.models.dtf import DTFConfig
 from dtf_test_gen.models.schema import DDLSet
@@ -122,7 +124,9 @@ def build_prompt(
 
     # One shared budget across every selected knowledge file, so a deep
     # reference can contribute several sections and an irrelevant file none.
-    knowledge = pack_knowledge(skills, set(dtf_signals(config)))
+    knowledge = pack_knowledge(
+        skills, set(dtf_signals(config)), vocabulary=dtf_vocabulary(config),
+    )
     if knowledge:
         payload["knowledge"] = knowledge
 

@@ -20,6 +20,9 @@ class LLMTransformation(BaseModel):
     value: Any = None
     values: list[Any] = Field(default_factory=list)
     description: str = ""
+    # The expression this was read from, quoted from the input. A rule that
+    # cites nothing was not found in the config -- it was invented.
+    source_expression: str = ""
 
     @field_validator("kind", "operator", mode="before")
     @classmethod

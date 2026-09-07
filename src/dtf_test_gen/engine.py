@@ -163,7 +163,7 @@ class Engine:
 
         if progress:
             progress(0.85, "Merging model findings...")
-        merged = merge_llm(static, llm, ddl)
+        merged = merge_llm(static, llm, ddl, bundle.payload.get("unparsed", []))
         merged.model = model
         merged.skills_used = static.skills_used
         self.cache.put(key, merged)
