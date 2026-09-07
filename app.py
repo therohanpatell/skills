@@ -26,6 +26,7 @@ from dtf_test_gen import ui_helpers as ui                                  # noq
 
 EXAMPLE_PROJECT = "./examples/simple_customer"
 KNOWLEDGE_DIR = "./knowledge"
+MANUAL_MODEL = "✏️ Type a model name…"
 
 st.set_page_config(page_title="DTF Test Data Generator", page_icon="🧪", layout="wide")
 
@@ -214,18 +215,60 @@ with st.sidebar:
     # ---- Ollama ------------------------------------------------------
     st.subheader("Ollama")
     host = st.text_input("Host", value=config.ollama.host)
-    status = OllamaClient(host).status()
-    if status.connected:
-        st.success(f"● Connected · {len(status.models)} model(s)")
-    else:
-        st.warning(f"⚠ Ollama is not running.\n\n{status.error}\n\nStart it with `ollama serve`.")
 
-    options = status.models or KNOWN_MODELS
-    default_model = config.ollama.model
+    c_status, c_refresh = st.columns([4, 1])
+    if st.session_state.pop("refresh_models", False):
+        st.cache_data.clear()
+    status = OllamaClient(host).status()
+    with c_status:
+        if status.connected:
+            st.success(f"● Connected · {len(status.models)} model(s)")
+        else:
+            st.warning(
+                f"⚠ Ollama is not running.\n\n{status.error}\n\n"
+                "Start it with `ollama serve`."
+            )
+    if c_refresh.button("↻", help="Re-detect installed models after an `ollama pull`"):
+        st.session_state["refresh_models"] = True
+        st.rerun()
+
+    # Installed models first, then any configured model, then a manual entry.
+    installed = list(status.models)
+    options = installed or list(KNOWN_MODELS)
+    default_model = st.session_state.get("chosen_model", config.ollama.model)
     if default_model not in options:
         options = [default_model, *options]
-    model = st.selectbox("Model", options, index=options.index(default_model))
+    options = [*options, MANUAL_MODEL]
+
+    picked = st.selectbox(
+        "Model", options, index=options.index(default_model),
+        help="Any Ollama model works. Pick an installed one, or choose "
+             f"'{MANUAL_MODEL}' to name one yourself.",
+    )
+    if picked == MANUAL_MODEL:
+        model = st.text_input(
+            "Model name", value=st.session_state.get("chosen_model", config.ollama.model),
+            placeholder="e.g. qwen3:14b, llama3.1:8b, mistral:7b",
+        ).strip() or config.ollama.model
+    else:
+        model = picked
+    st.session_state["chosen_model"] = model
+
+    if installed and model not in installed:
+        st.info(f"`{model}` is not installed. Run:\n\n`ollama pull {model}`")
+
     temperature = st.slider("Temperature", 0.0, 1.0, config.ollama.temperature, 0.05)
+
+    if st.button("Save as default", use_container_width=True,
+                 help="Write host, model and temperature to config.yaml"):
+        config.ollama.host = host
+        config.ollama.model = model
+        config.ollama.temperature = temperature
+        try:
+            written = config.save()
+            st.success(f"Saved to `{written}`.")
+        except OSError as exc:
+            st.error(f"Could not write config.yaml: {exc}")
 
     st.subheader("Generation")
     gen_mode = st.radio(

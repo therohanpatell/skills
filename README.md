@@ -53,8 +53,45 @@ ollama pull qwen3:8b
 ```
 
 `qwen3:8b` is the default. Qwen3 ships 0.6b / 1.7b / 4b / 8b / 14b / 30b / 32b —
-there is no 7b tag. The model is read from `config.yaml` and can be changed in
-the sidebar; installed models are detected automatically.
+there is no 7b tag.
+
+### Changing the model
+
+**Any Ollama model works** — nothing is hardcoded to Qwen. Three ways to change it:
+
+**1. In the sidebar (per run).** The **Model** dropdown lists everything Ollama
+reports as installed. Pull a new one while the app is open and press **↻** to
+re-detect it. To use a model that is not installed yet — or when Ollama is not
+running, so nothing can be detected — pick **✏️ Type a model name…** and enter
+it yourself, e.g. `llama3.1:8b`, `mistral:7b`, `gemma3:12b`, or a private tag.
+If the name is not installed, the sidebar shows the exact command:
+
+```
+llama3.1:8b is not installed. Run:
+ollama pull llama3.1:8b
+```
+
+**2. Make it stick.** Press **Save as default** to write the host, model and
+temperature to `config.yaml`, so the next run starts with it.
+
+**3. Edit `config.yaml` directly.**
+
+```yaml
+ollama:
+  host: http://localhost:11434
+  model: llama3.1:8b
+  temperature: 0.1
+```
+
+**From the CLI**, pass `--model`:
+
+```bash
+dtf-test-gen ./my-project --model llama3.1:8b
+```
+
+Whatever you pick, the contract is unchanged: the model returns JSON describing
+requirements, never SQL, and every rule it reports must cite an expression that
+was actually sent (see **Grounding** below).
 
 ### Choosing a model
 

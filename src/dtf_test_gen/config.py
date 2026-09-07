@@ -44,6 +44,31 @@ class AppConfig:
     output_directory: str = "./output"
     source: str | None = None
 
+    def save(self, path: str | Path = "config.yaml") -> Path:
+        """Write the current settings back to config.yaml, creating it if absent."""
+        target = Path(path)
+        payload = {
+            "ollama": {
+                "host": self.ollama.host,
+                "model": self.ollama.model,
+                "temperature": self.ollama.temperature,
+                "timeout": self.ollama.timeout,
+            },
+            "generation": {
+                "max_rows": self.generation.max_rows,
+                "max_retries": self.generation.max_retries,
+                "mode": self.generation.mode,
+            },
+            "skills": {"directory": self.skills_directory},
+            "output": {"directory": self.output_directory},
+            "cache": {"enabled": self.cache.enabled, "directory": self.cache.directory},
+        }
+        target.write_text(
+            yaml.safe_dump(payload, sort_keys=False, default_flow_style=False),
+            encoding="utf-8",
+        )
+        return target
+
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "AppConfig":
         """Read config.yaml if present; fall back to defaults silently."""
