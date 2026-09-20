@@ -149,16 +149,22 @@ with st.sidebar:
         names = [p.name for p in dtf_paths]
         choice = st.radio("Available", names, label_visibility="collapsed", key="dtf_choice")
         try:
-            dtf = load_dtf(dtf_paths[names.index(choice)])
+            dtf = load_dtf(dtf_paths[names.index(choice)], allow_runtime=True)
         except LoadError as exc:
             st.error(f"❌ **{exc.message}**\n\nFile: `{exc.file}`\n\nReason: {exc.reason}")
     elif uploaded_dtf is not None:
         try:
-            dtf = load_dtf_text(decode_upload(uploaded_dtf.getvalue(), uploaded_dtf.name), uploaded_dtf.name)
+            dtf = load_dtf_text(decode_upload(uploaded_dtf.getvalue(), uploaded_dtf.name), uploaded_dtf.name, allow_runtime=True)
         except LoadError as exc:
             st.error(f"❌ **{exc.message}**\n\nFile: `{exc.file}`\n\nReason: {exc.reason}")
     elif mode == "Local project":
         st.caption("No DTF configuration found.")
+
+    if dtf and dtf.needs_interpretation:
+        st.info("This framework layout will be interpreted at runtime by Ollama using your selected knowledge and source schemas. The upload was accepted.")
+        with st.expander("Built-in parser details (not a blocking error)"):
+            for note in dtf.parse_notes:
+                st.caption(note)
 
     # Tables the DTF references are pre-selected and highlighted.
     referenced = {t.lower() for t in (dtf.source_tables if dtf else [])}
@@ -307,8 +313,16 @@ with st.sidebar:
         "Use Ollama", value=status.connected,
         help="Off runs deterministic analysis only -- no model call at all.",
     )
+    runtime_interpretation = st.checkbox(
+        "Interpret DTF JSON using knowledge at runtime", value=True,
+        help="Ollama reads the original JSON, full selected knowledge and source DDLs before framework interpretation. Also handles partially recognized custom JSON. Raw SQL keeps the SQL parser.",
+    )
+    if dtf and dtf.needs_interpretation and not use_llm:
+        st.warning("Enable Use Ollama to interpret this custom DTF; no model request is made until you click Analyze.")
     full_knowledge = st.checkbox("Send complete selected knowledge", value=True,
                                  help="Off sends only ranked excerpts. Large documents may exceed your model's context window.")
+    if dtf and (dtf.needs_interpretation or (runtime_interpretation and use_llm and not dtf.is_sql_file)):
+        st.caption("Runtime interpretation sends complete selected knowledge and makes a fresh model request. Excerpt and cache settings apply to built-in analysis only.")
     knowledge_size = sum(len(s.text) for s in skills if s.selected)
     if full_knowledge and knowledge_size > 32000:
         st.warning(f"Selected knowledge has {knowledge_size:,} characters. A small local model may truncate this; select fewer files or use excerpts.")
@@ -328,7 +342,7 @@ with st.sidebar:
 
     engine = Engine(config)
     input_errors = ([f"{e.file}: {e.reason or e.message}" for e in load_errors]
-                    + (validate_inputs(dtf, ddl) if dtf else []))
+                    + (validate_inputs(dtf, ddl, check_sources=not (dtf.needs_interpretation or (runtime_interpretation and use_llm and not dtf.is_sql_file))) if dtf else []))
     for message in input_errors:
         st.error(message)
     analyse_clicked = st.button("Analyze and generate INSERTs", type="primary", use_container_width=True,
@@ -342,7 +356,7 @@ with st.sidebar:
 # Changing any run input/settings invalidates both analysis and generated SQL.
 signature = run_fingerprint(dtf, ddl, skills, {
     "model": model, "host": host, "temperature": temperature, "deep": gen_mode,
-    "use_llm": use_llm, "full_knowledge": full_knowledge, "max_rows": int(max_rows),
+    "use_llm": use_llm, "runtime_interpretation": runtime_interpretation, "full_knowledge": full_knowledge, "max_rows": int(max_rows),
     "include_not_null": include_not_null, "all_sources": include_all_sources,
     "all_columns": include_all_columns, "errors": input_errors,
 })
@@ -363,13 +377,13 @@ if analyse_clicked:
             outcome = engine.analyse(
                 dtf=dtf, ddl=ddl, skills=skills, model=model,
                 deep=(gen_mode == "Deep"), use_llm=use_llm, use_cache=use_cache,
-                temperature=temperature, host=host, full_knowledge=full_knowledge,
+                temperature=temperature, host=host, full_knowledge=full_knowledge, runtime_interpretation=runtime_interpretation,
                 progress=lambda pct, text: bar.progress(pct, text=text),
             )
             bar.progress(1.0, text="Analysis complete")
             st.session_state["outcome"] = outcome
             st.session_state["analysis"] = outcome.analysis
-            st.session_state["dtf"] = dtf
+            st.session_state["dtf"] = outcome.interpreted_dtf or dtf
         except (ValueError, LoadError) as exc:
             reset_results()
             st.error(str(exc))
@@ -399,6 +413,11 @@ if outcome:
             st.warning(f"⚠ {message}")
     if outcome.llm_called and not outcome.llm_error:
         st.success(f"✓ Analysed with `{model}` — ≈{outcome.prompt_tokens} prompt tokens.")
+
+if outcome and outcome.interpretation:
+    with st.expander("Runtime DTF interpretation and source evidence", expanded=True):
+        st.caption("The model interpreted your original JSON using the full selected knowledge. Review the normalized rules and JSON pointers before using these fixtures.")
+        st.json(outcome.interpretation)
 
 for warning in analysis.warnings:
     st.warning(f"⚠ {warning}")
@@ -605,7 +624,7 @@ with tab_sql:
         file_name="dtf_test_fixtures.zip", mime="application/zip", use_container_width=True,
     )
     if c2.button("💾 Save run", use_container_width=True):
-        run_dir = engine.write_output(analysis, generation, ddl, dtf_name)
+        run_dir = engine.write_output(analysis, generation, ddl, dtf_name, outcome=outcome)
         st.success(f"Wrote `{run_dir}/inserts.sql`, `coverage.json`, `analysis.json`.")
 
     st.caption(

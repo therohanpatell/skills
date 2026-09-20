@@ -30,6 +30,7 @@ from dtf_test_gen.validation.repair import repair_coverage
 from dtf_test_gen.workflow import validate_inputs
 from dtf_test_gen.generation.values import default_value
 from dtf_test_gen.models.generation import GeneratedTable
+from dtf_test_gen.llm.interpret import interpret_dtf, InterpretationError
 
 
 def _apply_qualification(dtf: DTFConfig, ddl: DDLSet) -> None:
@@ -61,6 +62,8 @@ class AnalysisOutcome:
     # Which knowledge files actually contributed, and how many characters each.
     knowledge_used: dict[str, int] = field(default_factory=dict)
     knowledge_skipped: list[str] = field(default_factory=list)
+    interpretation: dict = field(default_factory=dict)
+    interpreted_dtf: DTFConfig | None = None
 
 
 class Engine:
@@ -84,8 +87,36 @@ class Engine:
         host: str | None = None,
         progress=None,
         full_knowledge: bool = False,
+        runtime_interpretation: bool = False,
     ) -> AnalysisOutcome:
         """Static analysis, model review (with one repair retry), then merge."""
+        if dtf.needs_interpretation or (runtime_interpretation and use_llm and not dtf.is_sql_file):
+            if not use_llm:
+                raise InterpretationError("This DTF needs runtime interpretation. Enable Use Ollama and select your framework knowledge files; the built-in parser cannot interpret this layout.")
+            schema_errors = validate_inputs(dtf, ddl, check_sources=False)
+            if schema_errors:
+                raise InterpretationError("\n".join(schema_errors))
+            if progress:
+                progress(0.2, "Reading original DTF JSON with framework knowledge in Ollama...")
+            client = OllamaClient(host=host or self.config.ollama.host, timeout=self.config.ollama.timeout)
+            try:
+                interpreted = interpret_dtf(dtf, ddl, skills, client, model,
+                                            self.config.ollama.temperature if temperature is None else temperature)
+            except OllamaError as exc:
+                raise InterpretationError(f"Runtime interpretation failed: {exc}. No static fallback or INSERTs were generated for this unverified DTF.") from exc
+            _apply_qualification(interpreted.dtf, ddl)
+            analysis = analyse_static(interpreted.dtf, ddl)
+            analysis.source = "llm-interpreted"
+            analysis.model = model
+            analysis.skills_used = [s.name for s in skills if s.selected]
+            analysis.model_notes = [str(note) for note in interpreted.report.get("notes", [])]
+            analysis.warnings.append("DTF semantics were interpreted by the local model. Review the normalized DTF and source evidence; schema validation does not prove semantic equivalence.")
+            return AnalysisOutcome(
+                analysis=analysis, llm_called=True, prompt_tokens=interpreted.prompt_tokens,
+                knowledge_used=interpreted.knowledge_used, interpretation=interpreted.report,
+                interpreted_dtf=interpreted.dtf,
+                messages=["Interpreted the original DTF at runtime using complete selected knowledge files, then validated source requirements before generation."],
+            )
         errors = validate_inputs(dtf, ddl)
         if errors:
             raise ValueError("\n".join(errors))
@@ -242,11 +273,14 @@ class Engine:
         ddl: DDLSet,
         dtf_name: str,
         directory: str | None = None,
+        outcome: AnalysisOutcome | None = None,
     ) -> Path:
         """Write inserts.sql, coverage.json and analysis.json into a run folder."""
         root = Path(directory or self.config.output_directory)
         run_dir = root / datetime.now().strftime("%Y%m%d_%H%M%S")
         run_dir.mkdir(parents=True, exist_ok=True)
+        if outcome and outcome.interpretation:
+            (run_dir / "interpretation.json").write_text(json.dumps(outcome.interpretation, indent=2), encoding="utf-8")
 
         header = (
             f"DTF: {dtf_name}\n"

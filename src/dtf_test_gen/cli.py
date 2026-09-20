@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("project", help="Project directory containing ddl/, dtf/ and skills/")
     parser.add_argument("--dtf", help="DTF filename to use (defaults to the first found)")
     parser.add_argument("--model", default=None, help="Ollama model (default: from config.json)")
+    parser.add_argument("--interpret-runtime", action="store_true", help="Interpret JSON using framework knowledge before deterministic analysis")
     parser.add_argument("--no-llm", action="store_true", help="Deterministic analysis only")
     parser.add_argument("--deep", action="store_true", help="Include mappings and review notes in the model prompt")
     parser.add_argument("--no-cache", action="store_true", help="Ignore the analysis cache")
@@ -54,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     dtf_path = next((p for p in found.dtf if p.name == args.dtf), found.dtf[0]) if args.dtf else found.dtf[0]
     try:
-        dtf = load_dtf(dtf_path)
+        dtf = load_dtf(dtf_path, allow_runtime=True)
     except LoadError as exc:
         print(f"ERROR: {exc.message} - {exc.file}: {exc.reason}")
         return 1
@@ -69,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         additions = sorted(path.rglob("*.md")) if path.is_dir() else [path]
         paths.extend(additions)
         explicit.update(str(p) for p in additions)
-    errors = validate_inputs(dtf, ddl)
+    errors = validate_inputs(dtf, ddl, check_sources=not (dtf.needs_interpretation or (args.interpret_runtime and not args.no_llm)))
     if errors:
         for error in errors:
             print(error)
@@ -80,10 +81,17 @@ def main(argv: list[str] | None = None) -> int:
             skill.selected = True
 
     engine = Engine(config)
-    outcome = engine.analyse(
-        dtf, ddl, skills, model=model, deep=args.deep,
-        use_llm=not args.no_llm, use_cache=not args.no_cache,
-    )
+    try:
+        outcome = engine.analyse(
+            dtf, ddl, skills, model=model, deep=args.deep,
+            use_llm=not args.no_llm, use_cache=not args.no_cache,
+            runtime_interpretation=args.interpret_runtime,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    if outcome.interpreted_dtf:
+        dtf = outcome.interpreted_dtf
     for message in outcome.messages:
         print(message)
     if outcome.llm_error:
@@ -126,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Missing: " + ", ".join(generation.coverage.missing))
 
     if args.out:
-        run_dir = engine.write_output(analysis, generation, ddl, dtf.name, directory=args.out)
+        run_dir = engine.write_output(analysis, generation, ddl, dtf.name, directory=args.out, outcome=outcome)
         print(f"Wrote {run_dir}")
     else:
         print(render_all(generation, ddl))

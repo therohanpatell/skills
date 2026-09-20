@@ -12,7 +12,8 @@ knowledge. No Copilot account or cloud LLM is needed.
 2. Run `streamlit run app.py` with your existing Streamlit installation.
 3. In **Upload files**, upload one DTF JSON and multiple source DDL JSON files.
    Your permanent knowledge loads automatically; extra knowledge uploads are optional.
-4. Select your installed Ollama model and **Use Ollama**, then click
+4. Select your installed Ollama model, enable **Use Ollama**, and leave
+   **Interpret DTF JSON using knowledge at runtime** enabled, then click
    **Analyze and generate INSERTs**.
 5. Review **Overview**, **Transformations**, and **SQL**. Download the combined
    SQL or **SQL + reports** ZIP, containing SQL, analysis, coverage, and a run summary.
@@ -32,8 +33,10 @@ For bare schema arrays, the filename supplies the table name. The **Table names
 and BigQuery destination** expander lets you correct names/project/dataset to match
 the DTF. Missing schemas, duplicate short table names, missing join keys, and
 unsupported array/nested column types block generation with an actionable error.
-Multi-step JSON must be adapted or supplied as combined transformation SQL; the
-loader never silently processes just the first step. Invalid required NULLs and
+Unfamiliar and multi-step JSON is accepted for runtime model interpretation using
+your knowledge. It no longer has to match the built-in loader before the model
+can read it. If the model cannot translate the full pipeline into supported
+source requirements, generation stops with the unresolved operations. Invalid required NULLs and
 scalar values block SQL downloads. Complex SQL semantics still need review.
 
 Changing files, selected knowledge, model settings, row limits or column options
@@ -98,11 +101,26 @@ BigQuery table resources, and multi-table documents. See `examples/simple_custom
 DTF JSON supports SQL in `sql`/`query`, structured sources, mappings, filters,
 joins and grouping, and supported nested transformation documents.
 
-Project-specific JSON operation names may need a loader adapter. Knowledge
-helps interpret expressions already extracted from the config; it does not
-make arbitrary framework syntax executable. Unknown expressions are reported.
-If no supported transformation paths are found, the CLI exits with code 2.
-Review warnings even when recognized-path coverage is 100%.
+For framework-specific JSON, the UI runtime interpretation option is enabled by
+default. Upload first; the model is called only when you click Analyze. It receives
+the original JSON, complete selected framework knowledge, and source schema columns.
+It returns a normalized DTF plus JSON pointers linking each interpreted feature
+to the original input. Python validates this shape, schema references and supported
+requirements, then generates the fixtures. It does not execute model-generated code.
+
+Review **Runtime DTF interpretation and source evidence** before using the SQL.
+The ZIP and Save run output include `interpretation.json`. Source evidence checks
+and schema validation do not prove the model interpreted framework semantics correctly.
+Unresolved operations, invalid evidence, unknown columns and failed model calls
+stop runtime interpretation; they do not silently fall back to static/baseline SQL.
+A malformed JSON file still needs fixing before it can be sent to the model.
+
+For the CLI, unknown layouts automatically use runtime interpretation when Ollama
+is enabled. Use `--interpret-runtime` to interpret even partially recognized JSON.
+With `--no-llm`, unknown layouts produce an actionable error. Standard raw `.sql`
+files continue through SQL parsing. Runtime interpretation currently supports the
+engine's source-level scalar requirements and INNER/LEFT join paths; unsupported
+semantics must be listed as unresolved instead of approximated.
 
 Use JSON for schemas and DTF configurations. YAML parsing is not supported;
 there is no YAML package dependency or import. Legacy YAML files are reported
@@ -131,11 +149,17 @@ match/no-match, a CASE threshold, and COALESCE null/non-null behavior.
 
 The model returns JSON requirements, never INSERT SQL. Responses are validated
 with standard-library dataclass decoding. Invalid responses get one repair
-attempt; connection or parsing failures fall back to static analysis with a
-visible warning. Model findings are checked against source expressions and
+attempt; connection or parsing failures in built-in expression review fall back to static
+analysis with a visible warning. Runtime DTF interpretation fails without generating
+SQL if it cannot establish valid requirements. Model findings are checked against source expressions and
 schema names, but must still be reviewed for semantic correctness.
 
-`--no-cache` bypasses cached reads. Static-only and model-assisted cache entries
+Runtime interpretation makes a fresh model call (plus at most one repair request);
+it does not use the static-analysis cache. It always sends complete selected knowledge,
+regardless of the excerpt option, because relevance cannot be determined before
+the framework JSON has been interpreted.
+
+`--no-cache` bypasses cached reads for built-in analysis. Static-only and model-assisted cache entries
 are separate, and failed model requests are not cached. `--deep` includes extra
 mapping expressions and asks for review notes in the same model request.
 

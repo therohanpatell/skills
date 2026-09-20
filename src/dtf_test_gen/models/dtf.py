@@ -73,7 +73,13 @@ class DTFConfig(Model):
     aggregates: list[str] = field(default_factory=list)
     dedup_keys: list[str] = field(default_factory=list)
     window_partitions: list[str] = field(default_factory=list)
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: Any = field(default_factory=dict)
+    needs_interpretation: bool = False
+    parse_notes: list[str] = field(default_factory=list)
+
+    @property
+    def is_sql_file(self) -> bool:
+        return (self.source_file or "").lower().endswith((".sql", ".txt"))
 
     def resolve_alias(self, alias: str | None) -> str | None:
         if not alias:

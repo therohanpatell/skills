@@ -19,13 +19,13 @@ def decode_upload(data: bytes, filename: str) -> str:
                         reason="Save this file as UTF-8 JSON or Markdown.") from exc
 
 
-def validate_inputs(dtf, ddl) -> list[str]:
+def validate_inputs(dtf, ddl, check_sources: bool = True) -> list[str]:
     errors = []
     names = Counter(t.name.lower() for t in ddl.tables)
     for name, count in names.items():
         if count > 1:
             errors.append(f"Multiple schemas use table name '{name}'. This engine requires unique short table names; remove duplicates or use distinct test table names.")
-    for source in dtf.source_tables:
+    for source in dtf.source_tables if check_sources else []:
         expected = dtf.source_table_fq.get(source, source)
         table = ddl.get(expected)
         if table is None:
@@ -48,7 +48,7 @@ def validate_inputs(dtf, ddl) -> list[str]:
         for column in table.columns:
             if column.is_repeated or column.data_type.startswith("ARRAY") or base_type(column.data_type) not in supported:
                 errors.append(f"Unsupported column {table.fq_name}.{column.name}: {column.mode} {column.data_type}. Nested/array and non-scalar fixtures need explicit generation support.")
-    for join in dtf.joins:
+    for join in dtf.joins if check_sources else []:
         for name, column in ((join.left_table, join.left_column), (join.right_table, join.right_column)):
             table = ddl.get(dtf.resolve_alias(name))
             if table and not table.column(column):
@@ -86,6 +86,8 @@ def download_bundle(sql, analysis, generation, outcome) -> bytes:
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("inserts.sql", sql)
         archive.writestr("analysis.json", analysis.model_dump_json(indent=2))
+        if outcome and outcome.interpretation:
+            archive.writestr("interpretation.json", json.dumps(outcome.interpretation, indent=2))
         archive.writestr("coverage.json", json.dumps({
             "recognized_paths": generation.coverage.total,
             "covered": generation.coverage.covered,

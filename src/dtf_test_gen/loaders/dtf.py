@@ -299,15 +299,32 @@ def _merge_sql(config: DTFConfig, raw_sql: str) -> None:
         config.dedup_keys = list(config.window_partitions)
 
 
-def load_dtf(path: str | Path) -> DTFConfig:
+def prepare_dtf_payload(payload: Any, filename: str) -> DTFConfig:
+    """Check JSON shape now; defer framework-specific semantics to runtime."""
+    if not isinstance(payload, (dict, list)) or not payload:
+        raise LoadError("Invalid DTF document", file=filename,
+                        reason="Supply a non-empty JSON object or array.")
+    try:
+        return load_dtf_payload(payload, file=filename, fallback_name=Path(filename).stem)
+    except (LoadError, TypeError, ValueError, AttributeError, KeyError, IndexError) as exc:
+        reason = exc.reason if isinstance(exc, LoadError) else str(exc)
+        return DTFConfig(name=Path(filename).stem, source_file=filename, raw=payload,
+                         needs_interpretation=True, parse_notes=[reason or str(exc)])
+
+
+def load_dtf(path: str | Path, allow_runtime: bool = False) -> DTFConfig:
     p = Path(path)
     payload = read_any(p)
+    if allow_runtime:
+        return prepare_dtf_payload(payload, p.name)
     return load_dtf_payload(payload, file=p.name, fallback_name=p.stem)
 
 
-def load_dtf_text(text: str, filename: str) -> DTFConfig:
+def load_dtf_text(text: str, filename: str, allow_runtime: bool = False) -> DTFConfig:
     suffix = Path(filename).suffix.lower()
     if suffix in {".sql", ".txt"}:
         return load_dtf_payload({"name": Path(filename).stem, "sql": text}, file=filename)
     payload = parse_text(text, filename)
+    if allow_runtime:
+        return prepare_dtf_payload(payload, filename)
     return load_dtf_payload(payload, file=filename, fallback_name=Path(filename).stem)
