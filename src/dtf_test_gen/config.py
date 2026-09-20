@@ -1,11 +1,12 @@
-"""config.yaml handling. UI settings always override the file."""
+"""config.json handling. UI settings always override the file."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+import json
+from dtf_test_gen.loaders.discovery import parse_text, LoadError
 
 DEFAULT_MODEL = "qwen3:8b"
 # Fallback list shown when Ollama is unreachable; installed models are otherwise
@@ -44,8 +45,8 @@ class AppConfig:
     output_directory: str = "./output"
     source: str | None = None
 
-    def save(self, path: str | Path = "config.yaml") -> Path:
-        """Write the current settings back to config.yaml, creating it if absent."""
+    def save(self, path: str | Path = "config.json") -> Path:
+        """Write the current settings back to config.json, creating it if absent."""
         target = Path(path)
         payload = {
             "ollama": {
@@ -64,26 +65,26 @@ class AppConfig:
             "cache": {"enabled": self.cache.enabled, "directory": self.cache.directory},
         }
         target.write_text(
-            yaml.safe_dump(payload, sort_keys=False, default_flow_style=False),
+            json.dumps(payload, indent=2),
             encoding="utf-8",
         )
         return target
 
     @classmethod
-    def load(cls, path: str | Path = "config.yaml") -> "AppConfig":
-        """Read config.yaml if present; fall back to defaults silently."""
+    def load(cls, path: str | Path = "config.json") -> "AppConfig":
+        """Read config.json if present; fall back to defaults silently."""
         config = cls()
         p = Path(path)
         if not p.is_file():
-            for candidate in (Path("config.yaml.example"),):
+            for candidate in (Path("config.json.example"),):
                 if candidate.is_file():
                     p = candidate
                     break
             else:
                 return config
         try:
-            payload = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError):
+            payload = parse_text(p.read_text(encoding="utf-8"), p.name) or {}
+        except (OSError, LoadError):
             return config
         config.source = str(p)
 

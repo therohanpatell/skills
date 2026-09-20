@@ -260,7 +260,7 @@ with st.sidebar:
     temperature = st.slider("Temperature", 0.0, 1.0, config.ollama.temperature, 0.05)
 
     if st.button("Save as default", use_container_width=True,
-                 help="Write host, model and temperature to config.yaml"):
+                 help="Write host, model and temperature to config.json"):
         config.ollama.host = host
         config.ollama.model = model
         config.ollama.temperature = temperature
@@ -268,7 +268,7 @@ with st.sidebar:
             written = config.save()
             st.success(f"Saved to `{written}`.")
         except OSError as exc:
-            st.error(f"Could not write config.yaml: {exc}")
+            st.error(f"Could not write config.json: {exc}")
 
     st.subheader("Generation")
     gen_mode = st.radio(

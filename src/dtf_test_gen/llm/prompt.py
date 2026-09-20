@@ -18,7 +18,7 @@ from dtf_test_gen.models.analysis import AnalysisResult, ColumnRole
 from dtf_test_gen.models.dtf import DTFConfig
 from dtf_test_gen.models.schema import DDLSet
 
-PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "analyzer.md"
+PROMPT_PATH = Path(__file__).with_name("analyzer.md")
 _FALLBACK_SYSTEM = (
     "You analyse a BigQuery transformation and report what the source data must "
     "look like, as JSON only. You never write SQL and never invent row values."
@@ -120,6 +120,7 @@ def build_prompt(
         "tables": tables_payload,
         "transformation": transformation_payload,
         "unparsed": unparsed,
+        "raw_config": config.raw,
     }
 
     # One shared budget across every selected knowledge file, so a deep

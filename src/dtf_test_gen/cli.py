@@ -6,16 +6,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from rich.console import Console
-from rich.table import Table as RichTable
-
 from dtf_test_gen.config import AppConfig
 from dtf_test_gen.engine import Engine
 from dtf_test_gen.loaders import LoadError, discover_project, load_ddl, load_dtf, load_skills
 from dtf_test_gen.loaders.skills import auto_select
 from dtf_test_gen.sql.writer import render_all
-
-console = Console()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,78 +20,105 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("project", help="Project directory containing ddl/, dtf/ and skills/")
     parser.add_argument("--dtf", help="DTF filename to use (defaults to the first found)")
-    parser.add_argument("--model", default=None, help="Ollama model (default: from config.yaml)")
+    parser.add_argument("--model", default=None, help="Ollama model (default: from config.json)")
     parser.add_argument("--no-llm", action="store_true", help="Deterministic analysis only")
-    parser.add_argument("--deep", action="store_true", help="Deep mode: adds a validation call")
+    parser.add_argument("--deep", action="store_true", help="Include mappings and review notes in the model prompt")
     parser.add_argument("--no-cache", action="store_true", help="Ignore the analysis cache")
     parser.add_argument("--out", help="Write inserts.sql/coverage.json/analysis.json here")
+    parser.add_argument("--knowledge", action="append", default=[], help="Knowledge Markdown file or folder (repeatable)")
+    parser.add_argument("--host", help="Ollama host, default http://localhost:11434")
     args = parser.parse_args(argv)
 
     config = AppConfig.load()
+    if args.host:
+        config.ollama.host = args.host
     model = args.model or config.ollama.model
 
     found = discover_project(args.project)
     for message in found.errors:
-        console.print(f"[yellow]⚠ {message}[/]")
+        print(f"WARNING: {message}")
     if not found.dtf:
-        console.print("[red]No DTF configuration found.[/]")
+        print("No DTF configuration found.")
         return 1
 
     ddl, ddl_errors = load_ddl(list(found.ddl))
     for exc in ddl_errors:
-        console.print(f"[red]❌ {exc.message}[/] — {exc.file}: {exc.reason}")
+        print(f"ERROR: {exc.message} - {exc.file}: {exc.reason}")
     if not ddl.tables:
-        console.print("[red]No source schemas could be loaded.[/]")
+        print("No source schemas could be loaded.")
         return 1
 
+    if args.dtf and not any(p.name == args.dtf for p in found.dtf):
+        print(f"DTF file not found: {args.dtf}")
+        return 1
     dtf_path = next((p for p in found.dtf if p.name == args.dtf), found.dtf[0]) if args.dtf else found.dtf[0]
     try:
         dtf = load_dtf(dtf_path)
     except LoadError as exc:
-        console.print(f"[red]❌ {exc.message}[/] — {exc.file}: {exc.reason}")
+        print(f"ERROR: {exc.message} - {exc.file}: {exc.reason}")
         return 1
 
-    skills = auto_select(load_skills(list(found.skills)), dtf)
+    paths = list(found.skills)
+    explicit = set()
+    for location in args.knowledge:
+        path = Path(location)
+        if not path.exists():
+            print(f"Knowledge path not found: {path}")
+            return 1
+        additions = sorted(path.rglob("*.md")) if path.is_dir() else [path]
+        paths.extend(additions)
+        explicit.update(str(p) for p in additions)
+    skills = auto_select(load_skills(list(dict.fromkeys(paths))), dtf)
+    for skill in skills:
+        if skill.path in explicit:
+            skill.selected = True
+
     engine = Engine(config)
     outcome = engine.analyse(
         dtf, ddl, skills, model=model, deep=args.deep,
         use_llm=not args.no_llm, use_cache=not args.no_cache,
     )
     for message in outcome.messages:
-        console.print(f"[cyan]{message}[/]")
+        print(message)
     if outcome.llm_error:
-        console.print(f"[yellow]⚠ {outcome.llm_error}[/]")
+        print(f"WARNING: {outcome.llm_error}")
+
+    for name, size in outcome.knowledge_used.items():
+        print(f"Knowledge sent: {name} ({size} characters)")
+    for name in outcome.knowledge_skipped:
+        print(f"Knowledge omitted by relevance/budget: {name}")
 
     analysis = outcome.analysis
+    if not analysis.transformations:
+        print("No supported transformation paths were found. Check the DTF format; no test coverage can be claimed.")
+        return 2
     for warning in analysis.warnings:
-        console.print(f"[yellow]⚠ {warning}[/]")
+        print(f"WARNING: {warning}")
     for note in analysis.notes:
-        console.print(f"[dim]• {note}[/]")
+        print(f"- {note}")
     for note in analysis.model_notes:
-        console.print(f"[dim]model remark (unverified): {note}[/]")
+        print(f"model remark (unverified): {note}")
 
     generation = engine.generate(analysis, ddl)
 
-    table = RichTable(title=f"{dtf.name} · {analysis.source}")
-    table.add_column("Transformation")
-    table.add_column("Path")
-    table.add_column("Covered", justify="center")
+    print(f"{dtf.name} | {analysis.source}")
     for row in generation.coverage.rows:
-        table.add_row(row.transformation, row.path, "✓" if row.covered else "✗")
-    console.print(table)
-    console.print(
-        f"[bold]{generation.total_rows}[/] rows · "
-        f"[bold]{len(generation.scenarios)}[/] scenarios · "
-        f"coverage [bold]{generation.coverage.percent}%[/]"
+        print(f"{'PASS' if row.covered else 'MISSING'} | {row.transformation} | {row.path}")
+    for warning in generation.warnings:
+        print(f"WARNING: {warning}")
+    print(
+        f"{generation.total_rows} rows | "
+        f"{len(generation.scenarios)} scenarios | "
+        f"coverage {generation.coverage.percent}%"
     )
     if generation.coverage.missing:
-        console.print("[red]Missing: " + ", ".join(generation.coverage.missing) + "[/]")
+        print("Missing: " + ", ".join(generation.coverage.missing))
 
     if args.out:
         run_dir = engine.write_output(analysis, generation, ddl, dtf.name, directory=args.out)
-        console.print(f"Wrote [bold]{run_dir}[/]")
+        print(f"Wrote {run_dir}")
     else:
-        console.print(render_all(generation, ddl))
+        print(render_all(generation, ddl))
     return 0 if not generation.coverage.missing else 2
 
 

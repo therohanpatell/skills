@@ -5,7 +5,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from dataclasses import dataclass, field
+from dtf_test_gen.models.base import Model
 
 
 class ColumnRole(str, Enum):
@@ -59,14 +60,15 @@ class ConstraintOp(str, Enum):
     ANY = "any"
 
 
-class Constraint(BaseModel):
+@dataclass(kw_only=True)
+class Constraint(Model):
     """One requirement placed on a single source column by one path."""
 
     table: str
     column: str
     op: ConstraintOp
     value: Any = None
-    values: list[Any] = Field(default_factory=list)
+    values: list[Any] = field(default_factory=list)
     peer_table: str | None = None       # for joins: the table on the other side
     peer_column: str | None = None
     # True when meeting this constraint means the row is discarded by a filter,
@@ -125,25 +127,28 @@ class Constraint(BaseModel):
         return a.op != b.op or a.value != b.value
 
 
-class TransformationPath(BaseModel):
+@dataclass(kw_only=True)
+class TransformationPath(Model):
     id: str                          # e.g. T001.PASS
     transformation_id: str
     label: str                       # PASS / FAIL / NULL / MATCH ...
     description: str
-    constraints: list[Constraint] = Field(default_factory=list)
+    constraints: list[Constraint] = field(default_factory=list)
 
 
-class Transformation(BaseModel):
+@dataclass(kw_only=True)
+class Transformation(Model):
     id: str                          # T001
     kind: str                        # filter | condition | join | null_default | group_by | order_by | dedup | window
     expression: str
     description: str
     table: str | None = None
     column: str | None = None
-    paths: list[TransformationPath] = Field(default_factory=list)
+    paths: list[TransformationPath] = field(default_factory=list)
 
 
-class RequiredColumn(BaseModel):
+@dataclass(kw_only=True)
+class RequiredColumn(Model):
     table: str
     column: str
     role: ColumnRole = ColumnRole.UNUSED
@@ -153,26 +158,28 @@ class RequiredColumn(BaseModel):
     nullable: bool = True
 
 
-class Scenario(BaseModel):
+@dataclass(kw_only=True)
+class Scenario(Model):
     id: str                          # TC001
     description: str
-    covers: list[str] = Field(default_factory=list)      # path ids
-    constraints: list[Constraint] = Field(default_factory=list)
+    covers: list[str] = field(default_factory=list)      # path ids
+    constraints: list[Constraint] = field(default_factory=list)
 
 
-class AnalysisResult(BaseModel):
-    tables_used: list[str] = Field(default_factory=list)
-    tables_ignored: list[str] = Field(default_factory=list)
-    required_columns: list[RequiredColumn] = Field(default_factory=list)
-    transformations: list[Transformation] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)        # the engine's own findings
+@dataclass(kw_only=True)
+class AnalysisResult(Model):
+    tables_used: list[str] = field(default_factory=list)
+    tables_ignored: list[str] = field(default_factory=list)
+    required_columns: list[RequiredColumn] = field(default_factory=list)
+    transformations: list[Transformation] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)        # the engine's own findings
     # Free text the model wrote. Never acted on, never parsed -- displayed
     # separately so it is never mistaken for something the engine verified.
-    model_notes: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
+    model_notes: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     source: str = "static"           # static | llm | hybrid | cache
     model: str | None = None
-    skills_used: list[str] = Field(default_factory=list)
+    skills_used: list[str] = field(default_factory=list)
 
     @property
     def all_paths(self) -> list[TransformationPath]:

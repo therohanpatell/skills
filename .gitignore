@@ -9,4 +9,5 @@ dist/
 output/*/
 !output/.gitkeep
 config.yaml
+config.json
 .streamlit/

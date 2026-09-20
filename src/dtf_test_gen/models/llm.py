@@ -9,51 +9,46 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from dataclasses import dataclass, field
+from dtf_test_gen.models.base import Model
 
 
-class LLMTransformation(BaseModel):
+@dataclass(kw_only=True)
+class LLMTransformation(Model):
     kind: str = "filter"
     table: str = ""
     column: str = ""
     operator: str = "eq"
     value: Any = None
-    values: list[Any] = Field(default_factory=list)
+    values: list[Any] = field(default_factory=list)
     description: str = ""
     # The expression this was read from, quoted from the input. A rule that
     # cites nothing was not found in the config -- it was invented.
     source_expression: str = ""
 
-    @field_validator("kind", "operator", mode="before")
-    @classmethod
-    def _lower(cls, v: Any) -> str:
-        return str(v or "").strip().lower()
-
-    @field_validator("table", "column", mode="before")
-    @classmethod
-    def _clean_ident(cls, v: Any) -> str:
-        return str(v or "").strip().strip("`")
+    def __post_init__(self):
+        self.kind = self.kind.strip().lower()
+        self.operator = self.operator.strip().lower()
+        self.table = self.table.strip().strip("`")
+        self.column = self.column.strip().strip("`")
 
 
-class LLMColumnRole(BaseModel):
+@dataclass(kw_only=True)
+class LLMColumnRole(Model):
     table: str = ""
     column: str = ""
     role: str = "UNUSED"
     reason: str = ""
 
-    @field_validator("table", "column", mode="before")
-    @classmethod
-    def _clean_ident(cls, v: Any) -> str:
-        return str(v or "").strip().strip("`")
-
-    @field_validator("role", mode="before")
-    @classmethod
-    def _upper(cls, v: Any) -> str:
-        return str(v or "UNUSED").strip().upper()
+    def __post_init__(self):
+        self.table = self.table.strip().strip("`")
+        self.column = self.column.strip().strip("`")
+        self.role = self.role.strip().upper()
 
 
-class LLMAnalysis(BaseModel):
-    transformations: list[LLMTransformation] = Field(default_factory=list)
-    column_roles: list[LLMColumnRole] = Field(default_factory=list)
-    scenario_hints: list[str] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
+@dataclass(kw_only=True)
+class LLMAnalysis(Model):
+    transformations: list[LLMTransformation] = field(default_factory=list)
+    column_roles: list[LLMColumnRole] = field(default_factory=list)
+    scenario_hints: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)

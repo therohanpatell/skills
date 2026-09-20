@@ -81,14 +81,16 @@ class Engine:
         host: str | None = None,
         progress=None,
     ) -> AnalysisOutcome:
-        """Static analysis, then at most one Ollama call, then merge."""
+        """Static analysis, model review (with one repair retry), then merge."""
+        _apply_qualification(dtf, ddl)
         selected_skills = [s for s in skills if s.selected]
         key = cache_key(
             ddl_payloads=[t.model_dump_json() for t in ddl.tables],
             dtf_payload=dtf.model_dump_json(),
             skill_payloads=[s.text for s in selected_skills],
             model=model,
-            mode="deep" if deep else "fast",
+            mode=json.dumps(["v2", deep, use_llm, host or self.config.ollama.host,
+                             self.config.ollama.temperature if temperature is None else temperature]),
         )
 
         if use_cache:
@@ -102,7 +104,6 @@ class Engine:
 
         if progress:
             progress(0.15, "Parsing DTF and DDL...")
-        _apply_qualification(dtf, ddl)
         static = analyse_static(dtf, ddl)
         static.model = model
         static.skills_used = [s.name for s in selected_skills]
@@ -157,7 +158,7 @@ class Engine:
             outcome.llm_error = str(exc)
             outcome.messages.append("Falling back to static analysis only.")
             static.warnings.append(f"Model step skipped: {exc}")
-            self.cache.put(key, static)
+            # Do not cache failed model calls: the next run should retry Ollama.
             outcome.analysis = static
             return outcome
 
@@ -232,6 +233,9 @@ class Engine:
                     "dtf": dtf_name,
                     "model": analysis.model,
                     "source": analysis.source,
+                    "warnings": analysis.warnings + generation.warnings,
+                    "notes": analysis.notes,
+                    "model_notes": analysis.model_notes,
                     "tables_used": analysis.tables_used,
                     "tables_ignored": analysis.tables_ignored,
                     "transformations": [

@@ -61,7 +61,7 @@ def render_insert(generated: GeneratedTable, table: Table | None) -> str:
 
     types = {c.name.lower(): c.data_type for c in (table.columns if table else [])}
     columns = generated.columns
-    header = ",\n  ".join(columns)
+    header = ",\n  ".join(_quote_name(name) for name in columns)
     lines = []
     for row in generated.rows:
         rendered = ", ".join(

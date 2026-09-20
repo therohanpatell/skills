@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from dataclasses import dataclass, field
+from dtf_test_gen.models.base import Model
 
 
-class PredicateSpec(BaseModel):
+@dataclass(kw_only=True)
+class PredicateSpec(Model):
     """A raw predicate string plus where it came from (WHERE, CASE, HAVING...)."""
 
     expression: str
@@ -20,7 +22,8 @@ class PredicateSpec(BaseModel):
     column_hint: str | None = None
 
 
-class JoinSpec(BaseModel):
+@dataclass(kw_only=True)
+class JoinSpec(Model):
     left_table: str
     right_table: str
     left_column: str
@@ -34,7 +37,8 @@ class JoinSpec(BaseModel):
         return self.join_type.upper() in {"LEFT", "RIGHT", "FULL", "LEFT OUTER", "RIGHT OUTER", "FULL OUTER"}
 
 
-class ColumnMapping(BaseModel):
+@dataclass(kw_only=True)
+class ColumnMapping(Model):
     target_column: str
     expression: str | None = None
     source_table: str | None = None
@@ -52,23 +56,24 @@ class ColumnMapping(BaseModel):
         return bare.replace("_", "").isalnum() and "(" not in expr and " " not in expr
 
 
-class DTFConfig(BaseModel):
+@dataclass(kw_only=True)
+class DTFConfig(Model):
     name: str
     source_file: str | None = None
     raw_sql: str | None = None
     target_table: str | None = None
-    source_tables: list[str] = Field(default_factory=list)
-    table_aliases: dict[str, str] = Field(default_factory=dict)   # alias -> table
-    source_table_fq: dict[str, str] = Field(default_factory=dict)  # table -> project.dataset.table
-    joins: list[JoinSpec] = Field(default_factory=list)
-    predicates: list[PredicateSpec] = Field(default_factory=list)
-    mappings: list[ColumnMapping] = Field(default_factory=list)
-    group_by: list[str] = Field(default_factory=list)
-    order_by: list[str] = Field(default_factory=list)
-    aggregates: list[str] = Field(default_factory=list)
-    dedup_keys: list[str] = Field(default_factory=list)
-    window_partitions: list[str] = Field(default_factory=list)
-    raw: dict[str, Any] = Field(default_factory=dict)
+    source_tables: list[str] = field(default_factory=list)
+    table_aliases: dict[str, str] = field(default_factory=dict)   # alias -> table
+    source_table_fq: dict[str, str] = field(default_factory=dict)  # table -> project.dataset.table
+    joins: list[JoinSpec] = field(default_factory=list)
+    predicates: list[PredicateSpec] = field(default_factory=list)
+    mappings: list[ColumnMapping] = field(default_factory=list)
+    group_by: list[str] = field(default_factory=list)
+    order_by: list[str] = field(default_factory=list)
+    aggregates: list[str] = field(default_factory=list)
+    dedup_keys: list[str] = field(default_factory=list)
+    window_partitions: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
 
     def resolve_alias(self, alias: str | None) -> str | None:
         if not alias:

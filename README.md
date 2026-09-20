@@ -1,367 +1,128 @@
-# DTF Test Data Generator
+# DTF test data generator with local Ollama
 
-A local web app that reads your BigQuery DDL and a DTF transformation config,
-works out which source columns and which branches the transformation actually
-exercises, and generates the **smallest** set of `INSERT` statements that covers
-every one of them.
+Generate BigQuery source-table `INSERT` statements from JSON schemas, a DTF
+configuration, and Markdown knowledge files. Python constructs the values and
+SQL; your local Ollama model reviews transformation requirements using your
+knowledge. No Copilot account or cloud LLM is needed.
 
-You copy the SQL, run it in BigQuery yourself, and run your DTF pipeline
-yourself. The app never touches BigQuery and never runs your pipeline.
+## Run without installing packages
 
-```
-DDL + DTF + skills  ──▶  Python analysis  ──▶  one small Ollama call
-                                                      │
-                              minimal rows  ◀── deterministic generation
-                                     │
-                              BigQuery INSERT SQL
-```
-
-## What makes it small
-
-- **Column selection.** Only columns the transformation reads, plus `REQUIRED`
-  columns BigQuery would reject the insert without. Unused columns and plain 1:1
-  mappings are omitted from the `INSERT` entirely.
-- **Row packing.** Non-conflicting requirements share a row, so one row can cover
-  `status = ACTIVE` *and* `country IS NULL` *and* `amount <= 100` *and* a join match.
-- **One model call.** Parsing, path expansion, value generation and SQL rendering
-  are all deterministic Python. Ollama is only asked to reason about expressions
-  the parser could not classify, and it answers in JSON — never SQL.
-
-## Installation
-
-**macOS / Linux**
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-**Windows (PowerShell)**
+Requires Python 3.11+ and an installed Ollama model. The command-line JSON
+workflow has **zero third-party runtime dependencies**: no PyYAML, Pydantic,
+httpx, requests, Rich, pandas, Streamlit, or setuptools. HTTP uses Python's built-in urllib.
+Do not run `pip install`, `setup.py`, or a build command. `pyproject.toml`
+contains descriptive metadata only; `run.py` loads the source directly.
+Copy this repository to the other laptop, open a terminal in it, and run:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e .
+python run.py C:\path\to\my-project --dtf transform.json --knowledge C:\path\to\knowledge --model YOUR_INSTALLED_MODEL --out output
 ```
 
-## Ollama
+Replace `YOUR_INSTALLED_MODEL` with the exact name reported by `ollama list`.
+If Ollama is not running, start it with `ollama serve`. No model download is
+performed by this program. Use `--host http://localhost:11434` if you need to
+specify the endpoint.
 
-```bash
-ollama serve
-ollama pull qwen3:8b
+Run the included example without Ollama:
+
+```powershell
+python -S run.py examples/simple_customer --dtf customer_transform.json --no-llm --no-cache --out output
 ```
 
-`qwen3:8b` is the default. Qwen3 ships 0.6b / 1.7b / 4b / 8b / 14b / 30b / 32b —
-there is no 7b tag.
+`-S` disables site packages and demonstrates that no pip packages are needed.
+To use Ollama for the example, omit `--no-llm` and pass `--model`.
 
-### Changing the model
+## Files to copy from your existing Copilot setup
 
-**Any Ollama model works** — nothing is hardcoded to Qwen. Three ways to change it:
-
-**1. In the sidebar (per run).** The **Model** dropdown lists everything Ollama
-reports as installed. Pull a new one while the app is open and press **↻** to
-re-detect it. To use a model that is not installed yet — or when Ollama is not
-running, so nothing can be detected — pick **✏️ Type a model name…** and enter
-it yourself, e.g. `llama3.1:8b`, `mistral:7b`, `gemma3:12b`, or a private tag.
-If the name is not installed, the sidebar shows the exact command:
-
-```
-llama3.1:8b is not installed. Run:
-ollama pull llama3.1:8b
+```text
+my-project/
+  ddl/
+    customer.json
+    order.json
+  dtf/
+    transform.json
+  knowledge/
+    operations-catalog.md
+    transformation-rules.md
 ```
 
-**2. Make it stick.** Press **Save as default** to write the host, model and
-temperature to `config.yaml`, so the next run starts with it.
+Your Markdown knowledge files can be reused as reference documents. There is
+no required filename. `--knowledge` accepts a file or directory and can be
+repeated; Markdown inside the project is also discovered automatically.
+Unlike an IDE agent, the local model does not independently open files: this
+program reads them and includes selected sections in the prompt.
 
-**3. Edit `config.yaml` directly.**
+Sections are ranked against the DTF vocabulary and transformation types, with
+a shared 3,600-character knowledge budget. CLI output reports which files
+contributed and which selected files were omitted. Large documents are not
+sent in full. Put operation names and relevant column names in headings.
+The original JSON is included as context alongside the parsed transformation.
 
-```yaml
-ollama:
-  host: http://localhost:11434
-  model: llama3.1:8b
-  temperature: 0.1
+## Supported inputs and limits
+
+DDL JSON accepts BigQuery schema arrays, table documents with `columns`,
+BigQuery table resources, and multi-table documents. See `examples/simple_customer/ddl`.
+DTF JSON supports SQL in `sql`/`query`, structured sources, mappings, filters,
+joins and grouping, and supported nested transformation documents.
+
+Project-specific JSON operation names may need a loader adapter. Knowledge
+helps interpret expressions already extracted from the config; it does not
+make arbitrary framework syntax executable. Unknown expressions are reported.
+If no supported transformation paths are found, the CLI exits with code 2.
+Review warnings even when recognized-path coverage is 100%.
+
+Use JSON for schemas and DTF configurations. YAML parsing is not supported;
+there is no YAML package dependency or import. Legacy YAML files are reported
+and skipped. The included `order_summary.yaml` is a legacy example and produces
+a skip warning; use `customer_transform.json` for the runnable example.
+
+## Outputs and unit testing
+
+Each run writes a timestamped directory with:
+
+- `inserts.sql`: fixtures for source tables, including required columns.
+- `coverage.json`: recognized paths and whether generated rows exercise them.
+- `analysis.json`: transformations, column roles, and analysis warnings.
+
+Run the INSERTs in your BigQuery test environment, execute your DTF, then assert
+its actual target rows against your expected results. This tool does not run
+BigQuery or your DTF, and does not generate a complete expected-output oracle.
+Coverage is a check of input scenarios for recognized rules, not proof of full
+SQL or framework correctness. Review joins, aggregates, windows and complex
+expressions against your real pipeline.
+
+The included customer example exercises filter pass/fail, LEFT JOIN
+match/no-match, a CASE threshold, and COALESCE null/non-null behavior.
+
+## Model handling
+
+The model returns JSON requirements, never INSERT SQL. Responses are validated
+with standard-library dataclass decoding. Invalid responses get one repair
+attempt; connection or parsing failures fall back to static analysis with a
+visible warning. Model findings are checked against source expressions and
+schema names, but must still be reviewed for semantic correctness.
+
+`--no-cache` bypasses cached reads. Static-only and model-assisted cache entries
+are separate, and failed model requests are not cached. `--deep` includes extra
+mapping expressions and asks for review notes in the same model request.
+
+Settings are optional. Copy `config.json.example` to `config.json` to change the
+host, default model, timeout, row budget, or output directory. CLI flags override
+the corresponding settings. Configuration no longer requires YAML.
+
+## Optional web UI
+
+The existing `app.py` UI requires Streamlit and pandas to already be installed.
+If they are available, run `streamlit run app.py`. Otherwise use `python run.py`;
+the CLI is the supported path for a laptop where packages cannot be installed.
+
+## Verification
+
+```powershell
+python -S -m unittest discover -s tests -v
 ```
 
-**From the CLI**, pass `--model`:
-
-```bash
-dtf-test-gen ./my-project --model llama3.1:8b
-```
-
-Whatever you pick, the contract is unchanged: the model returns JSON describing
-requirements, never SQL, and every rule it reports must cite an expression that
-was actually sent (see **Grounding** below).
-
-### Choosing a model
-
-The app sends one small call (~1.3k prompt tokens, a few hundred tokens of JSON
-back), so this is a light workload — model choice is about accuracy on the
-unclassified expressions, not throughput.
-
-On a **CPU-only machine** speed is bound by memory bandwidth, not RAM capacity,
-so a model that *fits* is not necessarily a model you want to wait for:
-
-| Model | ~Disk | Fits in 32 GB | CPU-only feel |
-|---|---|---|---|
-| `qwen3:4b` | ~2.5 GB | easily | fastest; fine when the parser handles most of the DTF |
-| `qwen3:8b` | ~5 GB | easily | **recommended default** — good accuracy, seconds per call |
-| `qwen3:14b` | ~9 GB | yes | noticeably slower, modest accuracy gain |
-| `qwen3:30b` (MoE) | ~18 GB | yes | 30B total but only ~3B active per token, so it runs far closer to 8b speed than its size suggests — the best accuracy-per-second option on CPU |
-| `qwen3:32b` | ~20 GB | yes, but tight | dense 32B on CPU is slow; use only with a GPU |
-
-If you have a discrete GPU, whatever fits in VRAM wins. Without one, start at
-`qwen3:8b` and try `qwen3:30b` if you want more reasoning power.
-
-You can also skip the model entirely — uncheck **Use Ollama** for deterministic
-analysis only, which handles a DTF whose expressions the parser already
-understands.
-
-The app runs without Ollama too: uncheck **Use Ollama** and it falls back to
-deterministic analysis only.
-
-## Run
-
-```bash
-streamlit run app.py
-```
-
-The app opens at <http://localhost:8501>.
-
-## Workflow
-
-```
-Load DDL
-   ↓
-Load DTF
-   ↓
-Load skills          (auto-selected from the DTF's own features)
-   ↓
-Analyze              (one Ollama call, cached)
-   ↓
-Review coverage      Transformations tab — every path, PASS and FAIL
-   ↓
-Review data          Generated Data tab — the actual rows
-   ↓
-Copy / download SQL  SQL tab
-   ↓
-Run in BigQuery      manually
-   ↓
-Run your DTF         manually
-```
-
-Press **Example** in the sidebar to load `examples/simple_customer`, then
-**Analyze DTF**. It demonstrates a filter, a `CASE WHEN` conditional, a
-`LEFT JOIN` with both match and no-match paths, and `COALESCE` NULL handling.
-
-## Knowledge folder
-
-`knowledge/` starts empty. Drop your project's DTF documentation in it — **every
-Markdown file there is treated as knowledge and is always eligible**, whatever
-it is called. There is no required filename and no keyword gate.
-
-```
-knowledge/
-├── operations-catalog.md
-├── transformation-parameter-reference.md
-├── json-config-reference.md
-└── ... whatever you have
-```
-
-Files are split on their Markdown headings, and the sections matching what the
-selected DTF actually does are sent to the model, up to a shared budget of
-~3,600 characters per run. So:
-
-- A large reference contributes only its relevant sections, never its contents page.
-- A file with nothing to say about this DTF contributes nothing and costs no tokens.
-- Sections compete across files, so three strong sections of one document beat
-  one weak section from each of three documents.
-- Sections headed *audit columns*, *domain codes*, *conventions* and similar
-  always score, because they help whatever the transformation does.
-
-Sections are scored two ways, so your own wording is enough:
-
-1. **Against the DTF's own vocabulary** — the table names, column names,
-   operation names and literals in the config you selected. A section headed
-   *Row Restriction Rules* that never says "filter" still ranks, because it
-   mentions `employment_status`.
-2. Against generic transformation keywords, as a fallback.
-
-Put the subject in the **heading** and the rules in bullets beneath it;
-headings are weighted far more heavily than body text.
-
-The **Knowledge sent to the model** expander on the Overview tab shows exactly
-which files contributed and how much, so nothing is silently ignored.
-
-## Wide tables
-
-A source table with 200+ columns is the normal case, and only the columns the
-transformation reads reach the `INSERT`. On a 223-column fixture the app emits
-**18 columns**, omitting 205, at 100% coverage.
-
-Of those 18, some are `NOT NULL FILLER` — columns the transformation never reads
-but BigQuery would reject the INSERT without. Untick **Include NOT NULL columns**
-in the sidebar to drop them too, which is right when your target test table
-allows them to be empty and wrong when it does not.
-
-## Project layout the app expects
-
-Filenames are never assumed — everything is discovered by inspecting the files.
-
-```
-my-dtf-project/
-├── ddl/       *.json / *.yaml   BigQuery schemas
-├── dtf/       *.json / *.yaml   transformation configs
-└── skills/    *.md              DTF conventions and knowledge
-```
-
-You can also upload files directly instead of pointing at a directory.
-
-### DDL formats accepted
-
-| Shape | Example |
-|---|---|
-| `bq show --schema` output | `[{"name": "id", "type": "INT64", "mode": "REQUIRED"}]` |
-| Table document | `{"table": "customer", "dataset": "raw", "columns": [...]}` |
-| BigQuery table resource | `{"tableReference": {...}, "schema": {"fields": [...]}}` |
-| Multi-table document | `{"tables": [ ... ]}` |
-| Name → columns mapping | `{"customer": [...], "order": [...]}` |
-
-### DTF formats accepted
-
-| Shape | Example |
-|---|---|
-| SQL-carrying | `{"name": "...", "sql": "SELECT ... WHERE ..."}` |
-| Structured | `{"source": ..., "target": ..., "filters": [...], "joins": [...], "group_by": [...]}` |
-| Nested | `{"transformation": { <either of the above> }}` |
-| Bare `.sql` file | the query itself |
-
-Both families can be mixed in one file; the loader merges what it finds.
-
-## Grounding: why the model cannot invent a rule
-
-The model is only ever asked to classify expressions the parser could not read.
-Four gates stand between its answer and your SQL:
-
-1. **Citation.** Every transformation it reports must quote the
-   `source_expression` it was read from, and that quote must match one of the
-   expressions actually sent. A rule citing nothing, or citing an expression
-   that was never sent, is discarded — even when the table, column and operator
-   are all real. If nothing was left unclassified, *no* model transformation is
-   admissible, because the parser already understood the whole config.
-2. **DDL check.** Unknown tables, unknown columns and unsupported operators are
-   rejected and logged.
-3. **Static wins ties.** A model rule contradicting a parsed one is dropped.
-4. **Coverage verification.** Paths are checked against the rows actually
-   generated, so a wrong value shows as a missing path rather than passing.
-
-Values and SQL are generated by Python throughout; the model never writes
-either. Knowledge files are supplied as reference data and cannot themselves
-introduce a rule — a rule still has to come from the config.
-
-Rejections are visible, not silent:
-
-```
-Rejected 2 model transformation(s): they cited no expression that was actually sent.
-```
-
-## What the analysis produces
-
-Every source column is classified:
-
-| Role | Generated? | Meaning |
-|---|---|---|
-| `JOIN KEY` | yes | joins two tables |
-| `FILTER` | yes | gates rows in `WHERE` / `HAVING` / `QUALIFY` |
-| `CONDITION` | yes | branches a `CASE WHEN` |
-| `NULL/DEFAULT` | yes | wrapped in `COALESCE` / `IFNULL` |
-| `GROUP BY`, `AGGREGATE` | yes | grouping key or aggregated measure |
-| `ORDER BY`, `WINDOW`, `DEDUP KEY` | yes | ordering, partitioning, deduplication |
-| `NOT NULL FILLER` | yes | unused, but BigQuery requires a value |
-| `1:1 MAPPING` | no | copied to the target unchanged |
-| `UNUSED` | no | the transformation never reads it |
-
-Each transformation becomes explicit paths — `PASS`/`FAIL`, `NULL`/`NON_NULL`,
-`MATCH`/`NO_MATCH`, `MULTI_ROW`/`SINGLE_ROW` — and coverage is verified against
-the rows that were actually generated, not against the intent behind them. Gaps
-trigger an automatic repair pass before the SQL is shown.
-
-Two rules keep the generated rows meaningful:
-
-- A row that a `WHERE` clause rejects gets its own scenario, because a discarded
-  row cannot demonstrate anything downstream of the filter.
-- Every other scenario inherits the happy path — each filter's passing value and
-  each join's matching key — so the row it produces actually reaches the branch
-  under test.
-
-## Fast vs Deep
-
-| | Ollama calls | Use when |
-|---|---|---|
-| **Fast** (default) | 1 | almost always |
-| **Deep** | 1, plus a validation pass | the DTF has expressions the parser flags as not understood |
-
-## Caching
-
-Analysis is cached on a hash of DDL + DTF + selected skills + model + mode. An
-unchanged input never calls Ollama again. **Clear cache** in the sidebar resets it.
-
-## Output
-
-**Save run** writes a timestamped folder:
-
-```
-output/
-└── 20260904_120000/
-    ├── inserts.sql
-    ├── coverage.json
-    └── analysis.json
-```
-
-## Configuration
-
-Copy `config.yaml.example` to `config.yaml` and edit. Sidebar settings override it.
-
-```yaml
-ollama:
-  host: http://localhost:11434
-  model: qwen3:8b
-  temperature: 0.1
-
-generation:
-  max_rows: 50
-  max_retries: 2
-
-output:
-  directory: ./output
-```
-
-## Architecture
-
-Streamlit handles UI, session state and display only. All transformation
-reasoning lives in the engine.
-
-```
-app.py                        Streamlit UI
-src/dtf_test_gen/
-├── engine.py                 the two calls the UI makes: analyse, generate
-├── config.py                 config.yaml
-├── models/                   Pydantic contracts between every layer
-├── loaders/                  DDL / DTF / skill discovery and parsing
-├── analysis/                 SQL reading, predicate → path expansion, LLM merge
-├── llm/                      Ollama client, prompt building, JSON validation
-├── generation/               scenario packing, value generation, row building
-├── validation/               coverage verification and repair
-├── sql/                      BigQuery INSERT rendering
-└── cache/                    on-disk analysis cache
-prompts/analyzer.md           the system prompt
-examples/simple_customer/     worked example
-```
-
-## Not included, by design
-
-- No BigQuery execution — you run the SQL.
-- No DTF execution — you run your pipeline.
-- No cloud LLM calls — everything is local.
-- No pytest or automated test framework. Validation is a runtime feature of the
-  app (coverage verification and repair), not a separate test suite.
+Tests cover the example fixtures, coverage, JSON serialization/cache roundtrip,
+static/model cache separation, retry after a failed model request, knowledge
+prompt construction, malformed model responses, and the Ollama HTTP contract
+using a local test server. These tests do not execute SQL in BigQuery.

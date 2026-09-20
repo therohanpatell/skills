@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from dataclasses import dataclass, field
+from dtf_test_gen.models.base import Model
 
 
-class Column(BaseModel):
+@dataclass(kw_only=True)
+class Column(Model):
     name: str
     data_type: str = "STRING"
     mode: str = "NULLABLE"          # NULLABLE | REQUIRED | REPEATED
@@ -24,11 +26,12 @@ class Column(BaseModel):
         return self.mode.upper() == "REPEATED"
 
 
-class Table(BaseModel):
+@dataclass(kw_only=True)
+class Table(Model):
     name: str
     project: str | None = None
     dataset: str | None = None
-    columns: list[Column] = Field(default_factory=list)
+    columns: list[Column] = field(default_factory=list)
     source_file: str | None = None
 
     @property
@@ -47,10 +50,11 @@ class Table(BaseModel):
         return [c.name for c in self.columns]
 
 
-class DDLSet(BaseModel):
+@dataclass(kw_only=True)
+class DDLSet(Model):
     """All tables the user selected, addressable by any alias BigQuery allows."""
 
-    tables: list[Table] = Field(default_factory=list)
+    tables: list[Table] = field(default_factory=list)
 
     def get(self, name: str) -> Table | None:
         """Resolve `t`, `dataset.t` or `project.dataset.t` to a table."""

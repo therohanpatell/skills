@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+
 
 DATA_SUFFIXES = {".json", ".yaml", ".yml"}
 DOC_SUFFIXES = {".md", ".markdown"}
@@ -34,7 +34,7 @@ class LoadError(Exception):
 
 
 def read_any(path: str | Path) -> Any:
-    """Read a JSON or YAML file, raising LoadError with a readable reason."""
+    """Read JSON, raising LoadError with a readable reason for unsupported input."""
     p = Path(path)
     try:
         text = p.read_text(encoding="utf-8")
@@ -60,17 +60,12 @@ def _one_line(exc: Exception) -> str:
 def parse_text(text: str, filename: str = "<uploaded>") -> Any:
     suffix = effective_suffix(Path(filename))
     try:
-        if suffix in {".yaml", ".yml"}:
-            return yaml.safe_load(text)
         return json.loads(text)
-    except json.JSONDecodeError:
-        # Some "*.json" exports are really YAML; try the tolerant parser once.
-        try:
-            return yaml.safe_load(text)
-        except yaml.YAMLError as exc:
-            raise LoadError("Unable to parse file", file=filename, reason=_one_line(exc)) from exc
-    except yaml.YAMLError as exc:
-        raise LoadError("Unable to parse file", file=filename, reason=_one_line(exc)) from exc
+    except json.JSONDecodeError as exc:
+        if suffix in {".yaml", ".yml"}:
+            raise LoadError("YAML is not supported", file=filename,
+                            reason="Use JSON instead; this application uses only Python's standard library.") from exc
+        raise LoadError("Invalid JSON", file=filename, reason=_one_line(exc)) from exc
 
 
 def _looks_like_ddl(payload: Any) -> bool:

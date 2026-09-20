@@ -1,0 +1,5 @@
+{
+  "ollama": {"host": "http://localhost:11434", "model": "qwen3:8b", "temperature": 0.1, "timeout": 300},
+  "generation": {"max_rows": 50, "max_retries": 2},
+  "output": {"directory": "./output"}
+}

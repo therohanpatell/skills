@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 
-from pydantic import ValidationError
+from dtf_test_gen.models.base import ValidationError
 
 from dtf_test_gen.models.llm import LLMAnalysis
 
@@ -72,7 +72,7 @@ def parse_llm_json(text: str) -> LLMAnalysis:
     try:
         return LLMAnalysis.model_validate(payload)
     except ValidationError as exc:
-        raise LLMParseError(f"Response did not match the expected shape: {exc.error_count()} problem(s).") from exc
+        raise LLMParseError(f"Response did not match the expected shape: {exc}") from exc
 
 
 REPAIR_INSTRUCTION = (

@@ -1,4 +1,4 @@
-"""Pydantic models shared by every layer of the engine."""
+"""Standard-library dataclass models shared by every layer of the engine."""
 
 from dtf_test_gen.models.schema import Column, Table, DDLSet
 from dtf_test_gen.models.dtf import (
