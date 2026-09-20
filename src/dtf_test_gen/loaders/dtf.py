@@ -212,24 +212,32 @@ def load_dtf_payload(payload: Any, file: str | None = None, fallback_name: str =
     if not isinstance(payload, dict):
         raise LoadError("Unable to parse DTF configuration", file=file, reason="Top level is not an object.")
 
-    # Unwrap one level of nesting if the real config lives under a wrapper key.
+    original_payload = payload
+    # Never silently select only the first operation of a multi-step pipeline.
     nested = _first(payload, _NESTED_KEYS)
     if isinstance(nested, dict) and not (set(payload) & set(_SQL_KEYS + _MAPPING_KEYS)):
         merged = {**payload, **nested}
         payload = merged
     elif isinstance(nested, list) and nested and isinstance(nested[0], dict):
+        if len(nested) > 1:
+            raise LoadError("Multi-step DTF needs an adapter", file=file,
+                            reason="This JSON contains multiple transformation objects. Supply the combined transformation SQL or a supported single transformation; processing only the first step would miss rules.")
         payload = {**payload, **nested[0]}
 
     name = _first(payload, _NAME_KEYS) or fallback_name
     raw_sql = _first(payload, _SQL_KEYS)
     raw_sql = str(raw_sql) if isinstance(raw_sql, str) else None
 
-    config = DTFConfig(name=str(name), source_file=file, raw_sql=raw_sql, raw=payload)
+    config = DTFConfig(name=str(name), source_file=file, raw_sql=raw_sql, raw=original_payload)
 
     target = _first(payload, _TARGET_KEYS)
     config.target_table = _fq_table(target)
 
     config.source_tables = _names(_first(payload, _SOURCE_KEYS))
+    for source in _as_list(_first(payload, _SOURCE_KEYS)):
+        short, qualified = _table_name(source), _fq_table(source)
+        if short and qualified and "." in qualified:
+            config.source_table_fq[short] = qualified
     config.mappings = _parse_structured_mappings(_first(payload, _MAPPING_KEYS))
     config.predicates = _parse_structured_filters(_first(payload, _FILTER_KEYS))
     config.joins = _parse_structured_joins(

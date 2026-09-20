@@ -51,7 +51,7 @@ class CoverageReport(Model):
     @property
     def percent(self) -> float:
         if not self.rows:
-            return 100.0
+            return 0.0
         return round(100.0 * self.covered / self.total, 1)
 
 

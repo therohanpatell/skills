@@ -59,6 +59,8 @@ def _parse_column(payload: Any, table_name: str, file: str | None) -> Column:
     if isinstance(payload, str):
         # `"customer_id STRING"` or just `"customer_id"`.
         parts = payload.split()
+        if not parts:
+            raise LoadError("Unable to parse DDL", file=file, reason=f"Empty column in {table_name}.")
         return Column(name=parts[0], data_type=(parts[1].upper() if len(parts) > 1 else "STRING"))
     if not isinstance(payload, dict):
         raise LoadError(
@@ -83,7 +85,7 @@ def _parse_column(payload: Any, table_name: str, file: str | None) -> Column:
         data_type=str(data_type).strip().upper(),
         mode=_normalise_mode(mode_raw, payload),
         description=payload.get("description"),
-        default_value=payload.get("default") or payload.get("default_value"),
+        default_value=payload.get("default", payload.get("default_value", payload.get("defaultValueExpression"))),
     )
 
 
@@ -99,6 +101,8 @@ def _extract_columns(payload: dict[str, Any]) -> list[Any] | None:
 
 def _parse_table(payload: dict[str, Any], file: str | None, fallback_name: str) -> Table:
     ref = payload.get("tableReference") or payload.get("table_reference") or {}
+    if not isinstance(ref, dict):
+        raise LoadError("Invalid table reference", file=file, reason="tableReference must be a JSON object.")
     name = _first(payload, _TABLE_NAME_KEYS) or _first(ref, _TABLE_NAME_KEYS) or fallback_name
     if isinstance(name, dict):
         name = _first(name, _TABLE_NAME_KEYS) or fallback_name

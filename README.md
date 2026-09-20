@@ -5,6 +5,40 @@ configuration, and Markdown knowledge files. Python constructs the values and
 SQL; your local Ollama model reviews transformation requirements using your
 knowledge. No Copilot account or cloud LLM is needed.
 
+## Streamlit workflow: permanent knowledge, changing inputs
+
+1. Keep framework Markdown files in `knowledge/` beside `app.py`. This folder is
+   resolved relative to the application, even if you launch it from another folder.
+2. Run `streamlit run app.py` with your existing Streamlit installation.
+3. In **Upload files**, upload one DTF JSON and multiple source DDL JSON files.
+   Your permanent knowledge loads automatically; extra knowledge uploads are optional.
+4. Select your installed Ollama model and **Use Ollama**, then click
+   **Analyze and generate INSERTs**.
+5. Review **Overview**, **Transformations**, and **SQL**. Download the combined
+   SQL or **SQL + reports** ZIP, containing SQL, analysis, coverage, and a run summary.
+
+You can select a different knowledge directory and press **Save knowledge folder**
+to remember it across application restarts. No knowledge upload is needed each run.
+The UI sends complete selected knowledge by default. You can use ranked excerpts
+for smaller models; large full documents may exceed a model's context window.
+
+By default every selected source table gets an INSERT, with all its columns.
+Referenced tables get transformation scenarios; unreferenced tables and sources
+without recognized branches get labelled baseline fixtures. Baseline fixtures do
+not establish transformation coverage. The source table summary shows exactly
+which tables got SQL. You can disable the all-source/all-column options for smaller fixtures.
+
+For bare schema arrays, the filename supplies the table name. The **Table names
+and BigQuery destination** expander lets you correct names/project/dataset to match
+the DTF. Missing schemas, duplicate short table names, missing join keys, and
+unsupported array/nested column types block generation with an actionable error.
+Multi-step JSON must be adapted or supplied as combined transformation SQL; the
+loader never silently processes just the first step. Invalid required NULLs and
+scalar values block SQL downloads. Complex SQL semantics still need review.
+
+Changing files, selected knowledge, model settings, row limits or column options
+clears previous results, so downloads cannot silently use an earlier analysis.
+
 ## Run without installing packages
 
 Requires Python 3.11+ and an installed Ollama model. The command-line JSON
@@ -23,7 +57,7 @@ If Ollama is not running, start it with `ollama serve`. No model download is
 performed by this program. Use `--host http://localhost:11434` if you need to
 specify the endpoint.
 
-Run the included example without Ollama:
+Run the included CLI example without Ollama:
 
 ```powershell
 python -S run.py examples/simple_customer --dtf customer_transform.json --no-llm --no-cache --out output
@@ -52,10 +86,9 @@ repeated; Markdown inside the project is also discovered automatically.
 Unlike an IDE agent, the local model does not independently open files: this
 program reads them and includes selected sections in the prompt.
 
-Sections are ranked against the DTF vocabulary and transformation types, with
-a shared 3,600-character knowledge budget. CLI output reports which files
-contributed and which selected files were omitted. Large documents are not
-sent in full. Put operation names and relevant column names in headings.
+In excerpt mode, sections are ranked against the DTF vocabulary and transformation
+types with a shared 3,600-character budget. The CLI uses excerpt mode; the UI
+defaults to full selected documents. Both report contributing knowledge files. Put operation names and relevant column names in headings.
 The original JSON is included as context alongside the parsed transformation.
 
 ## Supported inputs and limits
@@ -122,7 +155,18 @@ the CLI is the supported path for a laptop where packages cannot be installed.
 python -S -m unittest discover -s tests -v
 ```
 
-Tests cover the example fixtures, coverage, JSON serialization/cache roundtrip,
+Tests cover uploads, all-source and pass-through fixtures, missing/ambiguous schemas,
+full knowledge prompts, changed-input identities, ZIP output, scalar SQL literals,
+the example fixtures, coverage, JSON serialization/cache roundtrip,
 static/model cache separation, retry after a failed model request, knowledge
 prompt construction, malformed model responses, and the Ollama HTTP contract
 using a local test server. These tests do not execute SQL in BigQuery.
+
+With Streamlit already installed, also run UI tests:
+
+```powershell
+python -m unittest discover -s tests -p test_streamlit_ui.py -v
+```
+
+These use Streamlit's AppTest, simulated file uploads, and a mocked Ollama status;
+they exercise the real application flow without requiring a working model.

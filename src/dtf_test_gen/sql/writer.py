@@ -7,6 +7,8 @@ the model is never asked to produce SQL.
 from __future__ import annotations
 
 import datetime as _dt
+import json
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from dtf_test_gen.generation.values import base_type
@@ -22,23 +24,43 @@ def literal(value: Any, data_type: str) -> str:
     kind = base_type(data_type)
     if value is None:
         return "NULL"
-    if kind in {"BOOL", "BOOLEAN"} or isinstance(value, bool):
+    if kind in {"BOOL", "BOOLEAN"}:
+        if isinstance(value, str):
+            if value.lower() not in {"true", "false"}:
+                raise ValueError(f"Invalid boolean: {value!r}")
+            value = value.lower() == "true"
+        if value not in (True, False, 0, 1):
+            raise ValueError(f"Invalid boolean: {value!r}")
         return "TRUE" if value else "FALSE"
+    if kind == "JSON":
+        encoded = value if isinstance(value, str) else json.dumps(value)
+        json.loads(encoded)
+        return f"JSON '{_escape(encoded)}'"
     if kind in _TEMPORAL:
         return f"{_TEMPORAL[kind]} '{_escape(str(value))}'"
     if kind == "BYTES":
         return f"b'{_escape(str(value))}'"
     if kind in {"INT64", "INTEGER", "INT", "SMALLINT", "BIGINT", "TINYINT"}:
         try:
-            return str(int(value))
-        except (TypeError, ValueError):
-            return f"'{_escape(str(value))}'"
+            number = Decimal(str(value))
+            if not number.is_finite() or number != number.to_integral_value():
+                raise ValueError(f"Invalid integer: {value!r}")
+            if not -(2 ** 63) <= number < 2 ** 63:
+                raise ValueError(f"Integer outside BigQuery INT64 range: {value!r}")
+            return str(int(number))
+        except InvalidOperation as exc:
+            raise ValueError(f"Invalid integer: {value!r}") from exc
     if kind in {"NUMERIC", "DECIMAL", "BIGNUMERIC", "FLOAT64", "FLOAT", "DOUBLE"}:
         try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return f"'{_escape(str(value))}'"
-        return str(int(number)) if number.is_integer() else str(number)
+            number = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise ValueError(f"Invalid number: {value!r}") from exc
+        if not number.is_finite():
+            raise ValueError(f"Non-finite number: {value!r}")
+        if kind in {"NUMERIC", "DECIMAL", "BIGNUMERIC"}:
+            prefix = "NUMERIC" if kind == "DECIMAL" else kind
+            return f"{prefix} '{number}'"
+        return str(number)
     if isinstance(value, (int, float)) and kind not in _QUOTED:
         return str(value)
     if isinstance(value, (_dt.date, _dt.datetime)):
@@ -47,7 +69,7 @@ def literal(value: Any, data_type: str) -> str:
 
 
 def _escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+    return text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 
 
 def _quote_name(fq_name: str) -> str:

@@ -126,8 +126,11 @@ class RowBuilder:
                 rows = self._build_rows(
                     table, target.columns, constraints, row_index[table.name], pinned,
                 )
-                target.rows.extend(rows)
-                row_index[table.name] += len(rows) - 1
+                remaining = self.max_rows - len(target.rows)
+                if len(rows) > remaining:
+                    self.warnings.append(f"Row cap of {self.max_rows} prevented a complete multi-row scenario for {table.name}.")
+                target.rows.extend(rows[:remaining])
+                row_index[table.name] += min(len(rows), remaining) - 1
 
         result = GenerationResult(
             tables=[t for t in generated.values() if t.rows],

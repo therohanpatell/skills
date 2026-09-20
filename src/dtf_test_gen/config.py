@@ -41,7 +41,7 @@ class AppConfig:
     ollama: OllamaSettings = field(default_factory=OllamaSettings)
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     cache: CacheSettings = field(default_factory=CacheSettings)
-    skills_directory: str = "./skills"
+    skills_directory: str = "./knowledge"
     output_directory: str = "./output"
     source: str | None = None
 

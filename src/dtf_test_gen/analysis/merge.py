@@ -67,33 +67,17 @@ def _promote(result: AnalysisResult, table, column_name: str, role: ColumnRole, 
     ))
 
 
-def _normalise(text: str) -> list[str]:
-    return [tok for tok in re.findall(r"[A-Za-z0-9_.']+", str(text or "").lower()) if tok]
-
-
 def _citation_matches(citation: str, allowed: list[str]) -> str | None:
-    """Return the allowed expression a citation refers to, or None.
-
-    Matching is deliberately loose -- a model may requote with different
-    spacing or quoting -- but it must genuinely overlap something that was
-    sent, so a citation of an expression that does not exist fails.
-    """
-    cited = _normalise(citation)
+    """Require the complete expression, retaining operators and literal values."""
+    def normalise(expression):
+        # Tolerate formatting outside literals, never an opposite operator or
+        # a changed literal. JSON responses are asked to quote the original.
+        tokens = re.findall(r"'(?:(?:'')|[^'])*'|`[^`]*`|\w+|[^\s]", expression)
+        return [token if token.startswith("'") else token.strip("`").lower() for token in tokens]
+    cited = normalise(citation)
     if not cited:
         return None
-    cited_set = set(cited)
-    for expression in allowed:
-        tokens = set(_normalise(expression))
-        if not tokens:
-            continue
-        overlap = len(cited_set & tokens)
-        if overlap and overlap >= max(1, int(0.6 * min(len(cited_set), len(tokens)))):
-            return expression
-        joined_c = " ".join(cited)
-        joined_e = " ".join(_normalise(expression))
-        if joined_c and (joined_c in joined_e or joined_e in joined_c):
-            return expression
-    return None
+    return next((expression for expression in allowed if normalise(expression) == cited), None)
 
 
 def merge_llm(

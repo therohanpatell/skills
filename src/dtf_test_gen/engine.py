@@ -27,6 +27,9 @@ from dtf_test_gen.models.generation import GenerationResult
 from dtf_test_gen.models.schema import DDLSet
 from dtf_test_gen.sql.writer import render_all
 from dtf_test_gen.validation.repair import repair_coverage
+from dtf_test_gen.workflow import validate_inputs
+from dtf_test_gen.generation.values import default_value
+from dtf_test_gen.models.generation import GeneratedTable
 
 
 def _apply_qualification(dtf: DTFConfig, ddl: DDLSet) -> None:
@@ -80,8 +83,12 @@ class Engine:
         temperature: float | None = None,
         host: str | None = None,
         progress=None,
+        full_knowledge: bool = False,
     ) -> AnalysisOutcome:
         """Static analysis, model review (with one repair retry), then merge."""
+        errors = validate_inputs(dtf, ddl)
+        if errors:
+            raise ValueError("\n".join(errors))
         _apply_qualification(dtf, ddl)
         selected_skills = [s for s in skills if s.selected]
         key = cache_key(
@@ -89,7 +96,7 @@ class Engine:
             dtf_payload=dtf.model_dump_json(),
             skill_payloads=[s.text for s in selected_skills],
             model=model,
-            mode=json.dumps(["v2", deep, use_llm, host or self.config.ollama.host,
+            mode=json.dumps(["v3", deep, use_llm, full_knowledge, host or self.config.ollama.host,
                              self.config.ollama.temperature if temperature is None else temperature]),
         )
 
@@ -97,8 +104,12 @@ class Engine:
             cached = self.cache.get(key)
             if cached is not None:
                 cached.skills_used = [s.name for s in selected_skills]
+                bundle = build_prompt(dtf, ddl, cached, skills, deep=deep, full_knowledge=full_knowledge)
+                knowledge = bundle.payload.get("knowledge", {}) if use_llm else {}
                 return AnalysisOutcome(
                     analysis=cached, from_cache=True,
+                    knowledge_used={name: len(body) for name, body in knowledge.items()},
+                    knowledge_skipped=[s.name for s in selected_skills if s.name not in knowledge] if use_llm else [],
                     messages=["Using cached transformation analysis."],
                 )
 
@@ -114,7 +125,7 @@ class Engine:
 
         if progress:
             progress(0.35, "Building focused prompt...")
-        bundle = build_prompt(dtf, ddl, static, skills, deep=deep)
+        bundle = build_prompt(dtf, ddl, static, skills, deep=deep, full_knowledge=full_knowledge)
         client = OllamaClient(
             host=host or self.config.ollama.host, timeout=self.config.ollama.timeout
         )
@@ -178,6 +189,8 @@ class Engine:
         ddl: DDLSet,
         max_rows: int | None = None,
         include_not_null: bool = True,
+        include_all_sources: bool = False,
+        include_all_columns: bool = False,
     ) -> GenerationResult:
         """Pack paths into scenarios, build rows, verify coverage, repair gaps."""
         limit = max_rows or self.config.generation.max_rows
@@ -190,6 +203,35 @@ class Engine:
             max_rows=limit, max_passes=self.config.generation.max_retries,
             include_not_null=include_not_null,
         )
+        # Preserve rule-bearing rows, then fill requested schema columns and
+        # create baseline fixtures for sources with no recognized scenarios.
+        existing = {table.table.lower(): table for table in result.tables}
+        wanted = {name.lower() for name in analysis.tables_used}
+        for table in ddl.tables:
+            if not include_all_sources and table.name.lower() not in wanted:
+                continue
+            generated = existing.get(table.name.lower())
+            if generated is None:
+                generated = GeneratedTable(table=table.name, fq_name=table.fq_name)
+                result.tables.append(generated)
+                generated.rows = [{}]
+                result.warnings.append(
+                    f"{table.fq_name}: baseline fixture only; no generated transformation scenario for this table."
+                )
+            emitted = set(generated.columns)
+            if include_all_columns:
+                emitted.update(table.column_names())
+            emitted.update(c.name for c in table.columns if c.required and include_not_null)
+            if not emitted and table.columns:
+                emitted.add(table.columns[0].name)
+            generated.columns = [c.name for c in table.columns if c.name in emitted]
+            generated.omitted_columns = [c.name for c in table.columns if c.name not in emitted]
+            for index, row in enumerate(generated.rows, 1):
+                for column in table.columns:
+                    if column.name in emitted and column.name not in row:
+                        row[column.name] = default_value(column.data_type, column.name, index)
+        if not analysis.all_paths:
+            result.warnings.append("No recognized transformation paths: these are baseline fixtures, not verified transformation tests.")
         return result
 
     # ------------------------------------------------------------------ write

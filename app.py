@@ -7,6 +7,7 @@ transformation reasoning lives in `src/dtf_test_gen`.
 from __future__ import annotations
 
 import sys
+import hashlib
 from pathlib import Path
 
 import streamlit as st
@@ -20,12 +21,14 @@ from dtf_test_gen.loaders import LoadError, discover_project, load_ddl, load_dtf
 from dtf_test_gen.loaders.ddl import load_ddl_text                         # noqa: E402
 from dtf_test_gen.loaders.dtf import load_dtf_text                         # noqa: E402
 from dtf_test_gen.loaders.skills import auto_select, load_skill_payload    # noqa: E402
+from dtf_test_gen.workflow import decode_upload, validate_inputs, validate_generation, run_fingerprint, download_bundle
 from dtf_test_gen.models.schema import DDLSet                              # noqa: E402
 from dtf_test_gen.sql.writer import render_all, render_insert              # noqa: E402
 from dtf_test_gen import ui_helpers as ui                                  # noqa: E402
 
-EXAMPLE_PROJECT = "./examples/simple_customer"
-KNOWLEDGE_DIR = "./knowledge"
+APP_ROOT = Path(__file__).resolve().parent
+EXAMPLE_PROJECT = str(APP_ROOT / "examples" / "simple_customer")
+KNOWLEDGE_DIR = str(APP_ROOT / "knowledge")
 MANUAL_MODEL = "✏️ Type a model name…"
 
 st.set_page_config(page_title="DTF Test Data Generator", page_icon="🧪", layout="wide")
@@ -54,7 +57,7 @@ def state(key: str, default=None):
     return st.session_state[key]
 
 
-config: AppConfig = state("config", AppConfig.load())
+config: AppConfig = state("config", AppConfig.load(APP_ROOT / "config.json"))
 state("ddl_tables", [])
 state("skills", [])
 state("dtf", None)
@@ -76,7 +79,7 @@ with st.sidebar:
 
     st.subheader("Project")
     mode = st.radio(
-        "Input mode", ["Local project", "Upload files"],
+        "Input mode", ["Upload files", "Local project"],
         horizontal=True, label_visibility="collapsed",
     )
 
@@ -88,12 +91,11 @@ with st.sidebar:
     if mode == "Local project":
         col_a, col_b = st.columns([3, 1])
         project_dir = col_a.text_input(
-            "Project directory", value=state("project_dir", EXAMPLE_PROJECT), key="project_dir",
+            "Project directory", value=EXAMPLE_PROJECT, key="project_dir",
         )
-        if col_b.button("Example", use_container_width=True, help="Load the bundled example project"):
-            st.session_state["project_dir"] = EXAMPLE_PROJECT
+        if col_b.button("Example", use_container_width=True, help="Load the bundled example project",
+                        on_click=lambda: st.session_state.update(project_dir=EXAMPLE_PROJECT)):
             reset_results()
-            st.rerun()
 
         found = discover_project(project_dir)
         if found.errors:
@@ -104,13 +106,13 @@ with st.sidebar:
         ddl_paths, dtf_paths, skill_paths = found.ddl, found.dtf, found.skills
     else:
         uploaded_ddl = st.file_uploader(
-            "DDL (JSON / YAML)", type=["json", "yaml", "yml"], accept_multiple_files=True,
+            "Source DDL JSON files", type=["json"], accept_multiple_files=True,
         )
         uploaded_dtf = st.file_uploader(
-            "DTF configuration", type=["json", "yaml", "yml", "sql"], accept_multiple_files=False,
+            "DTF JSON configuration", type=["json", "sql"], accept_multiple_files=False,
         )
         uploaded_skills = st.file_uploader(
-            "Skills (Markdown)", type=["md", "markdown"], accept_multiple_files=True,
+            "Additional knowledge for this run (optional)", type=["md", "markdown"], accept_multiple_files=True,
         )
 
     # ---- DDL ---------------------------------------------------------
@@ -123,12 +125,22 @@ with st.sidebar:
     elif uploaded_ddl:
         for upload in uploaded_ddl:
             try:
-                tables.extend(load_ddl_text(upload.getvalue().decode("utf-8"), upload.name))
+                tables.extend(load_ddl_text(decode_upload(upload.getvalue(), upload.name), upload.name))
             except LoadError as exc:
                 load_errors.append(exc)
 
     for exc in load_errors:
         st.error(f"❌ **{exc.message}**\n\nFile: `{exc.file}`\n\nReason: {exc.reason}")
+
+    if tables:
+        with st.expander("Table names and BigQuery destination"):
+            st.caption("For bare schema arrays, the filename becomes the table name. Correct it here to match the DTF. Use test project/dataset destinations after analysis by editing the downloaded SQL if needed.")
+            for idx, table in enumerate(tables):
+                identity = hashlib.sha256(table.model_dump_json().encode()).hexdigest()[:12]
+                st.caption(table.source_file or table.name)
+                table.name = st.text_input("Table name", table.name, key=f"name_{idx}_{identity}").strip()
+                table.dataset = st.text_input("Dataset", table.dataset or "", key=f"dataset_{idx}_{identity}").strip() or None
+                table.project = st.text_input("Project", table.project or "", key=f"project_{idx}_{identity}").strip() or None
 
     # ---- DTF ---------------------------------------------------------
     st.subheader("DTF configuration")
@@ -142,7 +154,7 @@ with st.sidebar:
             st.error(f"❌ **{exc.message}**\n\nFile: `{exc.file}`\n\nReason: {exc.reason}")
     elif uploaded_dtf is not None:
         try:
-            dtf = load_dtf_text(uploaded_dtf.getvalue().decode("utf-8"), uploaded_dtf.name)
+            dtf = load_dtf_text(decode_upload(uploaded_dtf.getvalue(), uploaded_dtf.name), uploaded_dtf.name)
         except LoadError as exc:
             st.error(f"❌ **{exc.message}**\n\nFile: `{exc.file}`\n\nReason: {exc.reason}")
     elif mode == "Local project":
@@ -152,10 +164,10 @@ with st.sidebar:
     referenced = {t.lower() for t in (dtf.source_tables if dtf else [])}
     selected_tables = []
     if tables:
-        for table in tables:
+        for table_index, table in enumerate(tables):
             hit = table.name.lower() in referenced
-            label = f"{'⭐ ' if hit else ''}{table.source_file or table.name}"
-            if st.checkbox(label, value=hit or not referenced, key=f"tbl_{table.fq_name}"):
+            label = f"{'⭐ ' if hit else ''}{table.fq_name} ({table.source_file or 'schema'})"
+            if st.checkbox(label, value=True, key=f"tbl_{table_index}_{table.fq_name}"):
                 selected_tables.append(table)
         if referenced:
             st.caption("⭐ referenced by the selected DTF")
@@ -166,11 +178,19 @@ with st.sidebar:
     # ---- Skills ------------------------------------------------------
     st.subheader("Knowledge")
     knowledge_dir = st.text_input(
-        "Knowledge folder", value=state("knowledge_dir", KNOWLEDGE_DIR),
+        "Knowledge folder", value=str(APP_ROOT / config.skills_directory),
         key="knowledge_dir",
         help="Every Markdown file in this folder is treated as knowledge and is "
              "always eligible, whatever it is called.",
     )
+    st.caption("Permanent Markdown knowledge is loaded on every run. Upload only the changing DTF and DDL JSON files above.")
+    if st.button("Save knowledge folder", use_container_width=True):
+        config.skills_directory = str(Path(knowledge_dir).expanduser().resolve())
+        try:
+            config.save(APP_ROOT / "config.json")
+            st.success("Knowledge folder saved for future sessions.")
+        except OSError as exc:
+            st.error(f"Could not save folder: {exc}")
     skills = []
     knowledge_found = discover_project(knowledge_dir) if knowledge_dir else None
     if knowledge_found and knowledge_found.skills:
@@ -182,13 +202,21 @@ with st.sidebar:
         st.caption("No Markdown files in that folder yet.")
 
     if mode == "Local project" and skill_paths:
-        seen = {Path(s.path).name for s in skills if s.path}
-        skills += [s for s in load_skills(list(skill_paths)) if s.name not in seen]
+        seen = {str(Path(s.path).resolve()) for s in skills if s.path}
+        skills += [s for s in load_skills(list(skill_paths)) if str(Path(s.path).resolve()) not in seen]
     elif uploaded_skills:
         skills += [
             load_skill_payload(u.name, u.getvalue().decode("utf-8", "replace"))
             for u in uploaded_skills
         ]
+    # Distinct files with the same basename must not overwrite prompt entries or widgets.
+    counts = {}
+    for skill in skills:
+        original = skill.name
+        counts[original] = counts.get(original, 0) + 1
+        if counts[original] > 1:
+            skill.name = f"{original} ({counts[original]})"
+        skill.always = True
     if skills and dtf:
         auto_select(skills, dtf)
 
@@ -265,7 +293,7 @@ with st.sidebar:
         config.ollama.model = model
         config.ollama.temperature = temperature
         try:
-            written = config.save()
+            written = config.save(APP_ROOT / "config.json")
             st.success(f"Saved to `{written}`.")
         except OSError as exc:
             st.error(f"Could not write config.json: {exc}")
@@ -273,12 +301,21 @@ with st.sidebar:
     st.subheader("Generation")
     gen_mode = st.radio(
         "Mode", ["Fast", "Deep"], horizontal=True,
-        help="Fast: one Ollama call. Deep: adds a validation pass.",
+        help="Deep adds mapping expressions and review notes to the model prompt.",
     )
     use_llm = st.checkbox(
         "Use Ollama", value=status.connected,
         help="Off runs deterministic analysis only -- no model call at all.",
     )
+    full_knowledge = st.checkbox("Send complete selected knowledge", value=True,
+                                 help="Off sends only ranked excerpts. Large documents may exceed your model's context window.")
+    knowledge_size = sum(len(s.text) for s in skills if s.selected)
+    if full_knowledge and knowledge_size > 32000:
+        st.warning(f"Selected knowledge has {knowledge_size:,} characters. A small local model may truncate this; select fewer files or use excerpts.")
+    include_all_sources = st.checkbox("Generate for every selected source table", value=True,
+                                      help="Unreferenced tables receive baseline fixtures, clearly marked as such.")
+    include_all_columns = st.checkbox("Include all source columns", value=True,
+                                      help="Keeps pass-through columns populated as well as transformation columns.")
     use_cache = st.checkbox("Cache analysis", value=config.cache.enabled)
     max_rows = st.number_input("Max rows per table", 1, 500, config.generation.max_rows)
     include_not_null = st.checkbox(
@@ -290,12 +327,28 @@ with st.sidebar:
     )
 
     engine = Engine(config)
-    analyse_clicked = st.button("Analyze DTF", type="primary", use_container_width=True)
+    input_errors = ([f"{e.file}: {e.reason or e.message}" for e in load_errors]
+                    + (validate_inputs(dtf, ddl) if dtf else []))
+    for message in input_errors:
+        st.error(message)
+    analyse_clicked = st.button("Analyze and generate INSERTs", type="primary", use_container_width=True,
+                               disabled=bool(input_errors) or dtf is None or not ddl.tables)
     if st.button("Clear cache", use_container_width=True):
         st.toast(f"Cleared {engine.cache.clear()} cached analyses.")
 
     st.caption(f"Config: `{config.source or 'defaults'}` · cached: {engine.cache.count()}")
 
+
+# Changing any run input/settings invalidates both analysis and generated SQL.
+signature = run_fingerprint(dtf, ddl, skills, {
+    "model": model, "host": host, "temperature": temperature, "deep": gen_mode,
+    "use_llm": use_llm, "full_knowledge": full_knowledge, "max_rows": int(max_rows),
+    "include_not_null": include_not_null, "all_sources": include_all_sources,
+    "all_columns": include_all_columns, "errors": input_errors,
+})
+if st.session_state.get("input_signature") != signature:
+    reset_results()
+    st.session_state["input_signature"] = signature
 
 # ------------------------------------------------------------------ actions
 if analyse_clicked:
@@ -310,13 +363,16 @@ if analyse_clicked:
             outcome = engine.analyse(
                 dtf=dtf, ddl=ddl, skills=skills, model=model,
                 deep=(gen_mode == "Deep"), use_llm=use_llm, use_cache=use_cache,
-                temperature=temperature, host=host,
+                temperature=temperature, host=host, full_knowledge=full_knowledge,
                 progress=lambda pct, text: bar.progress(pct, text=text),
             )
             bar.progress(1.0, text="Analysis complete")
             st.session_state["outcome"] = outcome
             st.session_state["analysis"] = outcome.analysis
             st.session_state["dtf"] = dtf
+        except (ValueError, LoadError) as exc:
+            reset_results()
+            st.error(str(exc))
         finally:
             bar.empty()
 
@@ -328,7 +384,7 @@ st.header("DTF Test Data Generator")
 if analysis is None:
     st.info(
         "Pick a project directory (or upload files) in the sidebar, choose a DTF "
-        "configuration, then press **Analyze DTF**.\n\n"
+        "configuration, then press **Analyze and generate INSERTs**.\n\n"
         f"The bundled example lives at `{EXAMPLE_PROJECT}`."
     )
     st.stop()
@@ -342,7 +398,7 @@ if outcome:
         if "invalid structured output" in message:
             st.warning(f"⚠ {message}")
     if outcome.llm_called and not outcome.llm_error:
-        st.success(f"✓ Analysed with `{model}` — 1 call, ≈{outcome.prompt_tokens} prompt tokens.")
+        st.success(f"✓ Analysed with `{model}` — ≈{outcome.prompt_tokens} prompt tokens.")
 
 for warning in analysis.warnings:
     st.warning(f"⚠ {warning}")
@@ -351,8 +407,15 @@ for warning in analysis.warnings:
 if st.session_state.get("generation") is None:
     st.session_state["generation"] = engine.generate(
         analysis, ddl, max_rows=int(max_rows), include_not_null=include_not_null,
+        include_all_sources=include_all_sources, include_all_columns=include_all_columns,
     )
 generation = st.session_state["generation"]
+invalid_rows = validate_generation(generation, ddl)
+if invalid_rows:
+    for message in invalid_rows:
+        st.error(message)
+    st.warning("No SQL download is offered until these schema/value conflicts are resolved.")
+    st.stop()
 
 tab_overview, tab_transforms, tab_scenarios, tab_data, tab_sql = st.tabs(
     ["Overview", "Transformations", "Test Scenarios", "Generated Data", "SQL"]
@@ -362,8 +425,8 @@ tab_overview, tab_transforms, tab_scenarios, tab_data, tab_sql = st.tabs(
 with tab_overview:
     stats = ui.counts(analysis)
     c = st.columns(4)
-    c[0].metric("Tables used", stats["tables_used"])
-    c[1].metric("Tables ignored", stats["tables_ignored"])
+    c[0].metric("Tables referenced", stats["tables_used"])
+    c[1].metric("Tables not referenced", stats["tables_ignored"])
     c[2].metric("Transformations", stats["transformations"])
     c[3].metric("Transformation paths", stats["paths"])
 
@@ -387,15 +450,27 @@ with tab_overview:
         delta_color="normal",
     )
     coverage = generation.coverage
-    c[3].metric("Coverage", f"{coverage.percent}%", f"{coverage.covered}/{coverage.total} paths")
+    c[3].metric("Coverage", f"{coverage.percent}%" if coverage.total else "N/A", f"{coverage.covered}/{coverage.total} recognized paths")
 
     if coverage.missing:
         st.error(
             "⚠ **Coverage incomplete**\n\nMissing:\n"
             + "\n".join(f"- {path}" for path in coverage.missing)
         )
+    elif not coverage.total:
+        st.warning("No recognized transformation paths. Baseline fixtures were generated; transformation coverage is not verified.")
     else:
-        st.success("✓ Every transformation path is covered.")
+        st.success("Every recognized input-scenario path is covered. Run the DTF and check its target results separately.")
+    st.subheader("Source table output")
+    generated_by_name = {t.table: t for t in generation.tables}
+    st.dataframe([
+        {"Source": t.fq_name, "Rows": generated_by_name[t.name].row_count if t.name in generated_by_name else 0,
+         "Purpose": "DTF source" if t.name in analysis.tables_used else "Baseline only (not referenced by DTF)",
+         "INSERT": "Generated" if t.name in generated_by_name else "Not generated"}
+        for t in ddl.tables
+    ], hide_index=True, use_container_width=True)
+    for warning in generation.warnings:
+        st.warning(warning)
     if coverage.repaired:
         st.info("Automatic repair added rows for: " + ", ".join(coverage.repaired))
 
@@ -415,7 +490,7 @@ with tab_overview:
         st.dataframe(frame, use_container_width=True, hide_index=True)
 
     if analysis.tables_ignored:
-        st.caption("Ignored tables: " + ", ".join(analysis.tables_ignored))
+        st.caption("Not referenced by the DTF (baseline fixtures when enabled): " + ", ".join(analysis.tables_ignored))
     if analysis.notes:
         with st.expander("Analysis notes"):
             for note in analysis.notes:
@@ -433,9 +508,7 @@ with tab_overview:
             f"Knowledge sent to the model ({len(outcome.knowledge_used)} file(s))"
         ):
             st.caption(
-                "Every file in the knowledge folder is eligible. Only the sections "
-                "matching this DTF are sent, so a file with nothing relevant to say "
-                "contributes nothing and costs no tokens."
+                "Complete files are included when enabled; otherwise the model receives ranked excerpts. Cached runs reuse the corresponding analysis."
             )
             for name, size in sorted(
                 outcome.knowledge_used.items(), key=lambda kv: -kv[1]
@@ -527,13 +600,17 @@ with tab_sql:
         "⬇ Download SQL", all_sql, file_name="inserts.sql",
         mime="text/plain", use_container_width=True,
     )
+    c3.download_button(
+        "Download SQL + reports", download_bundle(all_sql, analysis, generation, outcome),
+        file_name="dtf_test_fixtures.zip", mime="application/zip", use_container_width=True,
+    )
     if c2.button("💾 Save run", use_container_width=True):
         run_dir = engine.write_output(analysis, generation, ddl, dtf_name)
         st.success(f"Wrote `{run_dir}/inserts.sql`, `coverage.json`, `analysis.json`.")
 
     st.caption(
         "Use the copy button in the top-right of any code block below. "
-        "Only transformation-relevant and NOT NULL columns are included."
+        "Columns follow the selection in Generation settings. Baseline tables are listed in Overview."
     )
 
     st.subheader("All tables")

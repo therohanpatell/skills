@@ -11,6 +11,7 @@ from dtf_test_gen.engine import Engine
 from dtf_test_gen.loaders import LoadError, discover_project, load_ddl, load_dtf, load_skills
 from dtf_test_gen.loaders.skills import auto_select
 from dtf_test_gen.sql.writer import render_all
+from dtf_test_gen.workflow import validate_inputs, validate_generation
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
         additions = sorted(path.rglob("*.md")) if path.is_dir() else [path]
         paths.extend(additions)
         explicit.update(str(p) for p in additions)
+    errors = validate_inputs(dtf, ddl)
+    if errors:
+        for error in errors:
+            print(error)
+        return 1
     skills = auto_select(load_skills(list(dict.fromkeys(paths))), dtf)
     for skill in skills:
         if skill.path in explicit:
@@ -100,6 +106,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"model remark (unverified): {note}")
 
     generation = engine.generate(analysis, ddl)
+    errors = validate_generation(generation, ddl)
+    if errors:
+        for error in errors:
+            print(error)
+        return 2
 
     print(f"{dtf.name} | {analysis.source}")
     for row in generation.coverage.rows:

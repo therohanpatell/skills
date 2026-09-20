@@ -51,6 +51,7 @@ def build_prompt(
     static: AnalysisResult,
     skills: list[Skill],
     deep: bool = False,
+    full_knowledge: bool = False,
 ) -> PromptBundle:
     unparsed = [w.split("`")[1] for w in static.warnings if "not understood" in w and "`" in w]
     if deep:
@@ -125,7 +126,7 @@ def build_prompt(
 
     # One shared budget across every selected knowledge file, so a deep
     # reference can contribute several sections and an irrelevant file none.
-    knowledge = pack_knowledge(
+    knowledge = {s.name: s.text for s in skills if s.selected} if full_knowledge else pack_knowledge(
         skills, set(dtf_signals(config)), vocabulary=dtf_vocabulary(config),
     )
     if knowledge:
